@@ -5,7 +5,12 @@ const { normalizeReactionRoleSettings, getReactionRoleState } = require("../src/
 const { normalizeAntiRaidSettings, getAntiRaidState } = require("../src/modules/anti-raid");
 const { normalizeAutomationSettings, getAutomationState } = require("../src/modules/automations");
 const { normalizeModmailSettings, getModmailState } = require("../src/modules/modmail");
-const { normalizeApplicationSettings, getApplicationState } = require("../src/modules/applications");
+const {
+  getApplicationPrompts,
+  normalizeApplicationSettings,
+  getApplicationState,
+  validateApplicationSettings,
+} = require("../src/modules/applications");
 
 test("reaction roles normalize and require complete setup", () => {
   const settings = normalizeReactionRoleSettings({
@@ -56,4 +61,36 @@ test("modmail and applications states become live when channel/role exist", () =
     applicationsFormTitle: "Mod App",
   });
   assert.equal(getApplicationState(applications, channels, roles), "live");
+});
+
+test("applications prompts preserve configured order and enforce modal limits", () => {
+  const settings = normalizeApplicationSettings({
+    applicationsEnabled: "on",
+    applicationsChannelId: "123456789012345678",
+    applicationsReviewerRoleId: "123456789012345679",
+    applicationsQuestions: "Why do you want to help?\nWhat timezone are you in?\nHow active are you?",
+  });
+
+  assert.deepEqual(getApplicationPrompts(settings), [
+    "Why do you want to help?",
+    "What timezone are you in?",
+    "How active are you?",
+  ]);
+
+  const guild = {
+    channels: { cache: new Map([["123456789012345678", {}]]) },
+    roles: { cache: new Map([["123456789012345679", {}]]) },
+  };
+  assert.deepEqual(validateApplicationSettings(settings, guild), []);
+
+  const tooManyPrompts = normalizeApplicationSettings({
+    applicationsEnabled: "on",
+    applicationsChannelId: "123456789012345678",
+    applicationsReviewerRoleId: "123456789012345679",
+    applicationsQuestions: "1\n2\n3\n4\n5\n6",
+  });
+  assert.match(
+    validateApplicationSettings(tooManyPrompts, guild)[0],
+    /up to 5 prompts/i,
+  );
 });

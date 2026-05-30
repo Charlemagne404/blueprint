@@ -67,6 +67,7 @@ Current slash commands:
 - `/aireset`
 - `/announce`
 - `/suggest`
+- `/apply`
 
 Complex setup belongs in the website, not in oversized slash-command trees.
 
@@ -143,15 +144,23 @@ SESSION_COOKIE_NAME=blueprint.sid
 AI_SERVER_URL=http://localhost:3001/ask
 AI_ASK_URL=
 AI_CHAT_URL=
+AI_HEALTH_URL=
+AI_MODELS_URL=
 AI_SESSION_URL=
 AI_REQUEST_TIMEOUT_SECONDS=60
 AI_CHAT_STYLE=balanced
 AI_HISTORY_MESSAGES=12
 AI_USE_CONTEXT=true
 AI_USE_CACHE=true
+AI_INCLUDE_DEBUG=false
 AI_MODEL=
+AI_TEMPERATURE=
+AI_TOP_P=
+AI_NUM_PREDICT=
+AI_REPEAT_PENALTY=
 CONTINENTAL_ID_BASE_URL=http://localhost:5000
 CONTINENTAL_ID_AUTH_BASE_URL=http://localhost:5000
+CONTINENTAL_ID_HEALTH_URL=
 CONTINENTAL_ID_RESOLVE_URL=
 CONTINENTAL_ID_LOGIN_URL=https://login.continental-hub.com/popup.html
 CONTINENTAL_ID_DASHBOARD_URL=https://dashboard.continental-hub.com/?tab=settings
@@ -172,6 +181,9 @@ The app exposes:
 
 - `/healthz` for a lightweight process health check
 - `/readyz` for bot and storage readiness
+
+If the legacy local auth popup assets are not present at `../Dashboard/login popup`, `/auth-popup`
+falls back to the configured `AUTH_LOGIN_POPUP_URL`.
 
 Privileged dashboard POST routes use same-origin checks and CSRF tokens. Run the app behind
 HTTPS in production so secure cookies and HSTS are active.

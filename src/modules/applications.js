@@ -26,6 +26,16 @@ function normalizeApplicationSettings(input = {}) {
 function validateApplicationSettings(settings, guild) {
   if (!settings.applicationsEnabled) return [];
 
+  const prompts = getApplicationPrompts(settings);
+
+  if (prompts.length === 0) {
+    return ["Add at least one application prompt before enabling this module."];
+  }
+
+  if (prompts.length > 5) {
+    return ["Applications support up to 5 prompts so they fit the Discord modal flow."];
+  }
+
   if (!settings.applicationsChannelId) {
     return ["Choose an applications destination channel before enabling this module."];
   }
@@ -101,7 +111,7 @@ function renderApplicationsModuleCard({ blockerText = "", channelOptions, defaul
               <select name="applicationsReviewerRoleId">${roleOptionsHtml}</select>
             </label>
             <label class="module-field-wide">
-              <span>Questions (one per line)</span>
+              <span>Questions (one per line, up to 5)</span>
               <textarea name="applicationsQuestions" rows="6" maxlength="800">${escapeHtml(settings.applicationsQuestions)}</textarea>
             </label>
           </div>
@@ -130,6 +140,7 @@ function renderApplicationsModuleCard({ blockerText = "", channelOptions, defaul
 module.exports = {
   defaults,
   getApplicationState,
+  getApplicationPrompts,
   normalizeApplicationSettings,
   renderApplicationsModuleCard,
   validateApplicationSettings,
@@ -146,9 +157,13 @@ function getPreview(settings, channelOptions, roleOptions, state) {
     return "Applications need a destination channel and reviewer role before activation.";
   }
 
-  const questionCount = settings.applicationsQuestions
+  const questionCount = getApplicationPrompts(settings).length;
+  return `${settings.applicationsFormTitle} routes to ${getChannelLabel(settings.applicationsChannelId, channelOptions)} with ${questionCount} prompt(s), reviewed by ${getRoleLabel(settings.applicationsReviewerRoleId, roleOptions)}.`;
+}
+
+function getApplicationPrompts(settings = {}) {
+  return String(settings.applicationsQuestions || "")
     .split(/\r?\n/)
     .map((entry) => entry.trim())
-    .filter(Boolean).length;
-  return `${settings.applicationsFormTitle} routes to ${getChannelLabel(settings.applicationsChannelId, channelOptions)} with ${questionCount} prompt(s), reviewed by ${getRoleLabel(settings.applicationsReviewerRoleId, roleOptions)}.`;
+    .filter(Boolean);
 }

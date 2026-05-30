@@ -1,19 +1,24 @@
+const fs = require("node:fs");
 const crypto = require("node:crypto");
 const path = require("node:path");
 
 const express = require("express");
 const session = require("express-session");
 const {
+  ActionRowBuilder,
   ChatInputCommandInteraction,
   Client,
   DiscordAPIError,
   Events,
   GatewayIntentBits,
+  ModalBuilder,
   Partials,
   PermissionsBitField,
   REST,
   Routes,
   SlashCommandBuilder,
+  TextInputBuilder,
+  TextInputStyle,
 } = require("discord.js");
 
 const config = require("./config");
@@ -131,6 +136,7 @@ const {
 } = require("./modules/automations");
 const { normalizeModmailSettings, validateModmailSettings } = require("./modules/modmail");
 const {
+  getApplicationPrompts,
   normalizeApplicationSettings,
   validateApplicationSettings,
 } = require("./modules/applications");
@@ -169,6 +175,8 @@ if (runtimeConfigValidation.errors.length > 0) {
 }
 
 const SESSION_COOKIE_MAX_AGE_MS = 1000 * 60 * 60 * 24 * 7;
+const APPLICATION_MODAL_CUSTOM_ID = "applications-submit";
+const APPLICATION_ANSWER_INPUT_PREFIX = "applications-answer-";
 const sessionStore = createSessionStore({
   dataDir: config.dataDir,
   ttlMs: SESSION_COOKIE_MAX_AGE_MS,
@@ -232,21 +240,7 @@ const commands = [
     ),
   new SlashCommandBuilder()
     .setName("apply")
-    .setDescription("Submits an application to the configured applications module.")
-    .addStringOption((option) =>
-      option
-        .setName("answer_one")
-        .setDescription("Answer to the first prompt")
-        .setRequired(true)
-        .setMaxLength(500),
-    )
-    .addStringOption((option) =>
-      option
-        .setName("answer_two")
-        .setDescription("Answer to the second prompt")
-        .setRequired(true)
-        .setMaxLength(500),
-    ),
+    .setDescription("Opens the configured applications form for this server."),
 ];
 
 const client = new Client({
@@ -296,10 +290,14 @@ app.get("/favicon.ico", (request, response) => {
 app.get("/favicon.png", (request, response) => {
   response.sendFile(path.join(process.cwd(), "images", "blueprint-pfp2.png"));
 });
-app.use(
-  "/auth-popup",
-  express.static(path.resolve(process.cwd(), "..", "Dashboard", "login popup")),
-);
+const localAuthPopupDir = path.resolve(process.cwd(), "..", "Dashboard", "login popup");
+if (fs.existsSync(localAuthPopupDir)) {
+  app.use("/auth-popup", express.static(localAuthPopupDir));
+} else {
+  app.use("/auth-popup", (request, response) => {
+    response.redirect(302, config.authLoginPopupUrl);
+  });
+}
 
 app.use((request, response, next) => {
   response.locals.sessionUser = request.session.user || null;
@@ -758,6 +756,11 @@ client.on(Events.InteractionCreate, async (interaction) => {
     return;
   }
 
+  if (interaction.isModalSubmit()) {
+    await handleModalSubmit(interaction);
+    return;
+  }
+
   if (!interaction.isChatInputCommand()) {
     return;
   }
@@ -969,6 +972,12 @@ async function handleButtonInteraction(interaction) {
   }
 }
 
+async function handleModalSubmit(interaction) {
+  if (interaction.customId === APPLICATION_MODAL_CUSTOM_ID) {
+    await handleApplicationModalSubmit(interaction);
+  }
+}
+
 async function handleAnnouncementCommand(interaction) {
   if (!interaction.inGuild() || !interaction.guild) {
     await interaction.reply({
@@ -1122,15 +1131,74 @@ async function handleApplicationCommand(interaction) {
     return;
   }
 
+  const prompts = getApplicationPrompts(settings);
+  if (prompts.length === 0 || prompts.length > 5) {
+    await interaction.reply({
+      content: "Applications need between 1 and 5 prompts before members can submit the form.",
+      ephemeral: true,
+    });
+    return;
+  }
+
+  const modal = new ModalBuilder()
+    .setCustomId(APPLICATION_MODAL_CUSTOM_ID)
+    .setTitle(normalizeText(settings.applicationsFormTitle, "Application", 45));
+
+  for (const [index, prompt] of prompts.entries()) {
+    modal.addComponents(
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId(`${APPLICATION_ANSWER_INPUT_PREFIX}${index}`)
+          .setLabel(normalizeText(prompt, `Prompt ${index + 1}`, 45))
+          .setMaxLength(500)
+          .setRequired(true)
+          .setStyle(TextInputStyle.Paragraph),
+      ),
+    );
+  }
+
+  await interaction.showModal(modal);
+}
+
+async function handleApplicationModalSubmit(interaction) {
+  if (!interaction.inGuild() || !interaction.guild) {
+    await interaction.reply({
+      content: "Applications can only be submitted inside a server.",
+      ephemeral: true,
+    });
+    return;
+  }
+
+  await interaction.guild.channels.fetch();
+  await interaction.guild.roles.fetch();
+  const settings = getGuildSettings(interaction.guildId);
+  const errors = validateApplicationSettings(settings, interaction.guild);
+  if (!settings.applicationsEnabled || errors.length > 0) {
+    await interaction.reply({
+      content: errors[0] || "Applications are disabled in this server.",
+      ephemeral: true,
+    });
+    return;
+  }
+
+  const prompts = getApplicationPrompts(settings);
+  if (prompts.length === 0 || prompts.length > 5) {
+    await interaction.reply({
+      content: "Applications need between 1 and 5 prompts before members can submit the form.",
+      ephemeral: true,
+    });
+    return;
+  }
+
   const destination = interaction.guild.channels.cache.get(settings.applicationsChannelId);
-  const prompts = String(settings.applicationsQuestions || "")
-    .split(/\r?\n/)
-    .map((entry) => entry.trim())
-    .filter(Boolean);
-  const firstPrompt = prompts[0] || "Prompt 1";
-  const secondPrompt = prompts[1] || "Prompt 2";
-  const answerOne = normalizeText(interaction.options.getString("answer_one", true), "", 500);
-  const answerTwo = normalizeText(interaction.options.getString("answer_two", true), "", 500);
+  const answers = prompts.map((prompt, index) => ({
+    answer: normalizeText(
+      interaction.fields.getTextInputValue(`${APPLICATION_ANSWER_INPUT_PREFIX}${index}`),
+      "",
+      500,
+    ),
+    prompt,
+  }));
 
   await destination.send({
     allowedMentions: { parse: [], roles: [settings.applicationsReviewerRoleId] },
@@ -1141,11 +1209,7 @@ async function handleApplicationCommand(interaction) {
         ? `Reviewer role: <@&${settings.applicationsReviewerRoleId}>`
         : "",
       "",
-      `**${firstPrompt}**`,
-      answerOne,
-      "",
-      `**${secondPrompt}**`,
-      answerTwo,
+      ...answers.flatMap(({ prompt, answer }) => [`**${prompt}**`, answer, ""]),
     ]
       .filter(Boolean)
       .join("\n"),
