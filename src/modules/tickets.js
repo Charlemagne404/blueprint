@@ -1,3 +1,4 @@
+const { PermissionFlagsBits } = require("discord.js");
 const { escapeHtml, renderModuleCard, renderModuleFacts } = require("../html");
 const {
   canSendMessages,
@@ -28,6 +29,10 @@ function normalizeTicketSettings(input = {}) {
 function validateTicketSettings(settings, guild, botMember) {
   if (!settings.ticketsEnabled) {
     return [];
+  }
+
+  if (!botMember || !botMember.permissions.has(PermissionFlagsBits.ManageChannels)) {
+    return ["Blueprint needs Manage Channels permission before tickets can be enabled."];
   }
 
   if (!settings.ticketsIntakeChannelId) {

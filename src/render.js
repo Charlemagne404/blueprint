@@ -1116,9 +1116,9 @@ function renderGuildSettings({
           blockerText: pageMeta?.moduleBlockers?.reactionRoles || "",
           channelOptions,
           defaultOpen: Boolean(pageMeta?.moduleBlockers?.reactionRoles),
+          roleOptions,
           settings,
         })}
-
         ${renderTicketModuleCard({
           blockerText: pageMeta?.moduleBlockers?.tickets || "",
           channelOptions,
@@ -1170,7 +1170,6 @@ function renderGuildSettings({
           defaultOpen: Boolean(pageMeta?.moduleBlockers?.aiTools),
           settings,
         })}
-
         <section class="save-bar" data-save-bar>
           <div class="save-bar-copy">
             <strong class="save-bar-title" data-save-title>All changes saved</strong>

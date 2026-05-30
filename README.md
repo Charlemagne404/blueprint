@@ -63,6 +63,8 @@ Current slash commands:
 - `/hello`
 - `/dashboard`
 - `/countdown`
+- `/ai`
+- `/aireset`
 - `/announce`
 - `/suggest`
 
@@ -77,6 +79,8 @@ Users sign in with Continental ID, Blueprint reads the linked Discord identity f
 - the bot is installed
 - the linked Discord account is a member
 - that member has `Manage Server` or `Administrator`
+
+The AI module uses the same Continental identity linkage for Discord-side access. Blueprint resolves the author's linked Discord identity through the Dashboard backend before it will answer in the configured AI channel or accept `/ai`.
 
 ## Local Development
 
@@ -111,6 +115,8 @@ DISCORD_CLIENT_ID=
 DISCORD_SESSION_SECRET=
 AUTH_API_BASE_URL=
 AUTH_LOGIN_POPUP_URL=
+AI_SERVER_BASE_URL=
+VANGUARD_BACKEND_API_KEY=
 ```
 
 For production, also set:
@@ -134,6 +140,24 @@ PORT=3000
 DISCORD_GUILD_ID=
 AUTH_TRUSTED_LOGIN_ORIGINS=
 SESSION_COOKIE_NAME=blueprint.sid
+AI_SERVER_URL=http://localhost:3001/ask
+AI_ASK_URL=
+AI_CHAT_URL=
+AI_SESSION_URL=
+AI_REQUEST_TIMEOUT_SECONDS=60
+AI_CHAT_STYLE=balanced
+AI_HISTORY_MESSAGES=12
+AI_USE_CONTEXT=true
+AI_USE_CACHE=true
+AI_MODEL=
+CONTINENTAL_ID_BASE_URL=http://localhost:5000
+CONTINENTAL_ID_AUTH_BASE_URL=http://localhost:5000
+CONTINENTAL_ID_RESOLVE_URL=
+CONTINENTAL_ID_LOGIN_URL=https://login.continental-hub.com/popup.html
+CONTINENTAL_ID_DASHBOARD_URL=https://dashboard.continental-hub.com/?tab=settings
+VANGUARD_BACKEND_KEY_HEADER=X-Vanguard-Api-Key
+VANGUARD_INSTANCE_HEADER=X-Vanguard-Instance-Id
+VANGUARD_INSTANCE_ID=
 ```
 
 ## Storage

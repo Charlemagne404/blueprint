@@ -150,7 +150,7 @@ function renderAiToolsModuleCard({
               <strong>${escapeHtml(settings.aiToolsRequireMention ? "Mention-only" : "Open channel")}</strong>
             </div>
           </div>
-          <p class="preview-note">Keep AI help contained to one space so members know where to ask for summaries and drafting help.</p>
+          <p class="preview-note">Keep AI help contained to one space. Members also need a linked Continental ID account before Blueprint will answer.</p>
         </aside>
       </div>
     `,
@@ -158,7 +158,7 @@ function renderAiToolsModuleCard({
     blockerHtml: escapeHtml(blockerText),
     defaultOpen,
     descriptionHtml:
-      "Create a dedicated AI helper channel with controllable response behavior and tone.",
+      "Create a dedicated AI helper channel with Vanguard-style session memory, controllable response behavior, and linked-account access checks.",
     eyebrow: "AI tools",
     inputName: "aiToolsEnabled",
     moduleKey: "aiTools",

@@ -108,9 +108,19 @@ const {
   validateWelcomeSettings,
 } = require("./modules/welcome");
 const {
+  processLevelingMessage,
+} = require("./modules/leveling-runtime");
+const {
   normalizeLevelingSettings,
   validateLevelingSettings,
 } = require("./modules/leveling");
+const {
+  CLOSE_TICKET_CUSTOM_ID,
+  OPEN_TICKET_CUSTOM_ID,
+  closeTicket,
+  openTicket,
+  syncTicketPanel,
+} = require("./modules/tickets-runtime");
 const {
   normalizeReactionRoleSettings,
   validateReactionRoleSettings,
@@ -124,6 +134,15 @@ const {
   normalizeApplicationSettings,
   validateApplicationSettings,
 } = require("./modules/applications");
+const {
+  buildAiSessionId,
+  getAiAccessRequirementMessage,
+  isAiRuntimeConfigured,
+  requestAiReply,
+  resetAiSession,
+  resolveContinentalUser,
+  stripBotMention,
+} = require("./ai-runtime");
 const {
   clearCountdownAlertLastSentOn,
   checkStorageHealth,
@@ -169,6 +188,19 @@ const commands = [
     .setName("countdown")
     .setDescription("Shows the server's configured countdown."),
   new SlashCommandBuilder()
+    .setName("ai")
+    .setDescription("Ask the configured Blueprint AI helper.")
+    .addStringOption((option) =>
+      option
+        .setName("question")
+        .setDescription("What you want to ask")
+        .setRequired(true)
+        .setMaxLength(1500),
+    ),
+  new SlashCommandBuilder()
+    .setName("aireset")
+    .setDescription("Reset your Blueprint AI memory for this server channel."),
+  new SlashCommandBuilder()
     .setName("announce")
     .setDescription("Posts a quick staff announcement in the configured announcement channel.")
     .addStringOption((option) =>
@@ -197,6 +229,23 @@ const commands = [
       option
         .setName("anonymous")
         .setDescription("Hide your name in the public suggestion post"),
+    ),
+  new SlashCommandBuilder()
+    .setName("apply")
+    .setDescription("Submits an application to the configured applications module.")
+    .addStringOption((option) =>
+      option
+        .setName("answer_one")
+        .setDescription("Answer to the first prompt")
+        .setRequired(true)
+        .setMaxLength(500),
+    )
+    .addStringOption((option) =>
+      option
+        .setName("answer_two")
+        .setDescription("Answer to the second prompt")
+        .setRequired(true)
+        .setMaxLength(500),
     ),
 ];
 
@@ -565,11 +614,11 @@ app.post("/dashboard/:guildId", requireAuthPage, requireCsrfToken, async (reques
       ...validateSuggestionSettings(settings, guild, botMember),
       ...validateTicketSettings(settings, guild, botMember),
       ...validateLevelingSettings(settings, guild, botMember),
-      ...validateReactionRoleSettings(settings, guild, botMember),
+      ...validateReactionRoleSettings(settings, guild),
       ...validateAntiRaidSettings(settings, guild, botMember),
-      ...validateAutomationSettings(settings, guild, botMember),
-      ...validateModmailSettings(settings, guild, botMember),
-      ...validateApplicationSettings(settings, guild, botMember),
+      ...validateAutomationSettings(settings, guild),
+      ...validateModmailSettings(settings, guild),
+      ...validateApplicationSettings(settings, guild),
       ...validateAiToolsSettings(settings, guild, botMember),
       ...getRuntimeModuleValidationErrors(settings),
     ];
@@ -605,6 +654,11 @@ app.post("/dashboard/:guildId", requireAuthPage, requireCsrfToken, async (reques
       settings,
       request.session.user.id,
     );
+
+    await syncTicketPanel(guild, settings).catch((error) => {
+      console.error(`Failed to sync ticket panel for guild ${guild.id}.`);
+      console.error(error);
+    });
 
     response.redirect(`/dashboard/${guild.id}?saved=1`);
   } catch (error) {
@@ -692,9 +746,18 @@ async function registerCommands() {
 client.once(Events.ClientReady, (readyClient) => {
   console.log(`Logged in as ${readyClient.user.tag}`);
   startCountdownAlertScheduler();
+  syncTicketPanelsForClient().catch((error) => {
+    console.error("Failed to sync ticket panels.");
+    console.error(error);
+  });
 });
 
 client.on(Events.InteractionCreate, async (interaction) => {
+  if (interaction.isButton()) {
+    await handleButtonInteraction(interaction);
+    return;
+  }
+
   if (!interaction.isChatInputCommand()) {
     return;
   }
@@ -706,6 +769,7 @@ client.on(Events.GuildMemberAdd, async (member) => {
   const settings = getGuildSettings(member.guild.id);
 
   try {
+    await evaluateAntiRaid(member.guild, settings);
     const screening = await screenNewMember(member, settings);
     await logMemberJoin(member, settings);
     if (screening.preventedOnboarding) {
@@ -714,6 +778,7 @@ client.on(Events.GuildMemberAdd, async (member) => {
 
     await assignAutoRole(member, settings);
     await sendWelcomeMessage(member, settings);
+    await runMemberJoinAutomation(member, settings);
   } catch (error) {
     console.error(`Failed onboarding flow for guild ${member.guild.id}.`);
     console.error(error);
@@ -766,6 +831,7 @@ client.on(Events.MessageDelete, async (message) => {
 
 client.on(Events.MessageCreate, async (message) => {
   if (!message.guild) {
+    await handleModmailInbound(message);
     return;
   }
 
@@ -773,8 +839,11 @@ client.on(Events.MessageCreate, async (message) => {
 
   try {
     await moderateMessage(message, settings);
+    await runKeywordAutomation(message, settings);
+    await processLevelingMessage(message, settings);
+    await handleAiToolsMessage(message, settings);
   } catch (error) {
-    console.error(`Failed automod flow for guild ${message.guild.id}.`);
+    console.error(`Failed message automation flow for guild ${message.guild.id}.`);
     console.error(error);
   }
 });
@@ -782,6 +851,7 @@ client.on(Events.MessageCreate, async (message) => {
 client.on(Events.MessageReactionAdd, async (reaction, user) => {
   try {
     await syncStarboardReaction(reaction, user);
+    await syncReactionRole(reaction, user, false);
   } catch (error) {
     const guildId = reaction.message?.guildId || reaction.message?.guild?.id || "unknown";
     console.error(`Failed starboard add flow for guild ${guildId}.`);
@@ -792,6 +862,7 @@ client.on(Events.MessageReactionAdd, async (reaction, user) => {
 client.on(Events.MessageReactionRemove, async (reaction, user) => {
   try {
     await syncStarboardReaction(reaction, user);
+    await syncReactionRole(reaction, user, true);
   } catch (error) {
     const guildId = reaction.message?.guildId || reaction.message?.guild?.id || "unknown";
     console.error(`Failed starboard remove flow for guild ${guildId}.`);
@@ -842,6 +913,16 @@ async function handleCommand(interaction) {
     return;
   }
 
+  if (interaction.commandName === "ai") {
+    await handleAiCommand(interaction, settings);
+    return;
+  }
+
+  if (interaction.commandName === "aireset") {
+    await handleAiResetCommand(interaction, settings);
+    return;
+  }
+
   if (interaction.commandName === "announce") {
     await handleAnnouncementCommand(interaction);
     return;
@@ -851,11 +932,41 @@ async function handleCommand(interaction) {
     await handleSuggestionCommand(interaction);
     return;
   }
+  if (interaction.commandName === "apply") {
+    await handleApplicationCommand(interaction);
+    return;
+  }
 
   await interaction.reply({
     content: "Unknown command.",
     ephemeral: true,
   });
+}
+
+async function handleButtonInteraction(interaction) {
+  if (!interaction.inGuild() || !interaction.guild) {
+    await interaction.reply({
+      content: "This action only works inside a server.",
+      ephemeral: true,
+    });
+    return;
+  }
+
+  const settings = getGuildSettings(interaction.guild.id);
+  const botMember = await getBotGuildMember(interaction.guild).catch(() => null);
+
+  if (interaction.customId === OPEN_TICKET_CUSTOM_ID) {
+    await interaction.deferReply({ ephemeral: true });
+    const result = await openTicket(interaction, settings, botMember);
+    await interaction.editReply(result);
+    return;
+  }
+
+  if (interaction.customId === CLOSE_TICKET_CUSTOM_ID) {
+    await interaction.deferReply({ ephemeral: true });
+    const result = await closeTicket(interaction, settings);
+    await interaction.editReply(result || "Ticket closed.");
+  }
 }
 
 async function handleAnnouncementCommand(interaction) {
@@ -983,6 +1094,302 @@ async function handleSuggestionCommand(interaction) {
     content: `Suggestion #${suggestionNumber} posted in <#${publicChannel.id}>.`,
     ephemeral: true,
   });
+
+  await runSuggestionAutomation(interaction.guild, settings, {
+    suggestionNumber,
+    userTag: interaction.user.tag,
+  });
+}
+
+async function handleApplicationCommand(interaction) {
+  if (!interaction.inGuild() || !interaction.guild) {
+    await interaction.reply({
+      content: "Applications can only be submitted inside a server.",
+      ephemeral: true,
+    });
+    return;
+  }
+
+  await interaction.guild.channels.fetch();
+  await interaction.guild.roles.fetch();
+  const settings = getGuildSettings(interaction.guildId);
+  const errors = validateApplicationSettings(settings, interaction.guild);
+  if (!settings.applicationsEnabled || errors.length > 0) {
+    await interaction.reply({
+      content: errors[0] || "Applications are disabled in this server.",
+      ephemeral: true,
+    });
+    return;
+  }
+
+  const destination = interaction.guild.channels.cache.get(settings.applicationsChannelId);
+  const prompts = String(settings.applicationsQuestions || "")
+    .split(/\r?\n/)
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+  const firstPrompt = prompts[0] || "Prompt 1";
+  const secondPrompt = prompts[1] || "Prompt 2";
+  const answerOne = normalizeText(interaction.options.getString("answer_one", true), "", 500);
+  const answerTwo = normalizeText(interaction.options.getString("answer_two", true), "", 500);
+
+  await destination.send({
+    allowedMentions: { parse: [], roles: [settings.applicationsReviewerRoleId] },
+    content: [
+      `**${settings.applicationsFormTitle}**`,
+      `Submitted by: <@${interaction.user.id}>`,
+      settings.applicationsReviewerRoleId
+        ? `Reviewer role: <@&${settings.applicationsReviewerRoleId}>`
+        : "",
+      "",
+      `**${firstPrompt}**`,
+      answerOne,
+      "",
+      `**${secondPrompt}**`,
+      answerTwo,
+    ]
+      .filter(Boolean)
+      .join("\n"),
+  });
+
+  await interaction.reply({
+    content: `Application submitted to <#${destination.id}>.`,
+    ephemeral: true,
+  });
+}
+
+async function handleAiCommand(interaction, settings) {
+  if (!interaction.inGuild() || !interaction.guild || !settings) {
+    await interaction.reply({
+      content: "Blueprint AI is only available inside configured servers.",
+      ephemeral: true,
+    });
+    return;
+  }
+
+  const availabilityError = getAiAvailabilityError(settings);
+  if (availabilityError) {
+    await interaction.reply({
+      content: availabilityError,
+      ephemeral: true,
+    });
+    return;
+  }
+
+  const botMember = await getBotGuildMember(interaction.guild).catch(() => null);
+  const validationErrors = validateAiToolsSettings(settings, interaction.guild, botMember);
+  if (validationErrors.length > 0) {
+    await interaction.reply({
+      content: validationErrors[0],
+      ephemeral: true,
+    });
+    return;
+  }
+
+  if (interaction.channelId !== settings.aiToolsChannelId) {
+    await interaction.reply({
+      content: `Use Blueprint AI in <#${settings.aiToolsChannelId}>.`,
+      ephemeral: true,
+    });
+    return;
+  }
+
+  const accessError = await getAiAccessError(interaction.user.id);
+  if (accessError) {
+    await interaction.reply({
+      content: accessError,
+      ephemeral: true,
+    });
+    return;
+  }
+
+  await interaction.deferReply();
+  const reply = await requestAiReply({
+    persona: settings.aiToolsPersona,
+    question: normalizeText(interaction.options.getString("question", true), "", 1500),
+    runtimeConfig: config,
+    sessionId: buildAiSessionId(interaction.guildId, interaction.channelId, interaction.user.id),
+    userId: interaction.user.id,
+    username: interaction.user.tag,
+  });
+
+  await interaction.editReply({
+    allowedMentions: { parse: [] },
+    content: formatAiReplyContent(reply),
+  });
+}
+
+async function handleAiResetCommand(interaction, settings) {
+  if (!interaction.inGuild() || !interaction.guild || !settings) {
+    await interaction.reply({
+      content: "Blueprint AI memory can only be reset inside configured servers.",
+      ephemeral: true,
+    });
+    return;
+  }
+
+  const availabilityError = getAiAvailabilityError(settings);
+  if (availabilityError) {
+    await interaction.reply({
+      content: availabilityError,
+      ephemeral: true,
+    });
+    return;
+  }
+
+  const botMember = await getBotGuildMember(interaction.guild).catch(() => null);
+  const validationErrors = validateAiToolsSettings(settings, interaction.guild, botMember);
+  if (validationErrors.length > 0) {
+    await interaction.reply({
+      content: validationErrors[0],
+      ephemeral: true,
+    });
+    return;
+  }
+
+  if (interaction.channelId !== settings.aiToolsChannelId) {
+    await interaction.reply({
+      content: `Reset AI memory from <#${settings.aiToolsChannelId}>.`,
+      ephemeral: true,
+    });
+    return;
+  }
+
+  const accessError = await getAiAccessError(interaction.user.id);
+  if (accessError) {
+    await interaction.reply({
+      content: accessError,
+      ephemeral: true,
+    });
+    return;
+  }
+
+  await interaction.deferReply({ ephemeral: true });
+  const result = await resetAiSession(
+    buildAiSessionId(interaction.guildId, interaction.channelId, interaction.user.id),
+    config,
+  );
+
+  if (result.ok) {
+    await interaction.editReply("AI session memory reset for this channel.");
+    return;
+  }
+
+  await interaction.editReply(
+    result.error
+      ? `Could not reset AI session memory right now. ${result.error}`
+      : `Could not reset AI session memory (HTTP ${result.status || "unknown"}).`,
+  );
+}
+
+async function handleAiToolsMessage(message, settings) {
+  if (
+    !settings.aiToolsEnabled ||
+    !message.guild ||
+    !message.author ||
+    !message.member ||
+    message.author.bot ||
+    !client.user
+  ) {
+    return;
+  }
+
+  if (message.channelId !== settings.aiToolsChannelId) {
+    return;
+  }
+
+  const botMember = await getBotGuildMember(message.guild).catch(() => null);
+  const validationErrors = validateAiToolsSettings(settings, message.guild, botMember);
+  if (validationErrors.length > 0) {
+    return;
+  }
+
+  let question = normalizeText(message.content, "", 1500);
+  if (settings.aiToolsRequireMention) {
+    if (!message.mentions.has(client.user.id)) {
+      return;
+    }
+    question = stripBotMention(question, client.user.id);
+  }
+
+  if (!question) {
+    return;
+  }
+
+  const accessError = await getAiAccessError(message.author.id);
+  if (accessError) {
+    await message.reply({
+      allowedMentions: { parse: [] },
+      content: accessError,
+    }).catch(() => null);
+    return;
+  }
+
+  await message.channel.sendTyping().catch(() => null);
+  const reply = await requestAiReply({
+    persona: settings.aiToolsPersona,
+    question,
+    runtimeConfig: config,
+    sessionId: buildAiSessionId(message.guild.id, message.channelId, message.author.id),
+    userId: message.author.id,
+    username: message.author.tag,
+  });
+
+  await message.reply({
+    allowedMentions: { parse: [] },
+    content: formatAiReplyContent(reply),
+  }).catch(() => null);
+}
+
+async function handleModmailInbound(message) {
+  if (!message.author || message.author.bot || !client.user || message.author.id === client.user.id) {
+    return;
+  }
+
+  for (const guild of client.guilds.cache.values()) {
+    try {
+      const member = await guild.members.fetch(message.author.id).catch(() => null);
+      if (!member) {
+        continue;
+      }
+
+      const settings = getGuildSettings(guild.id);
+      if (!settings.modmailEnabled) {
+        continue;
+      }
+
+      const errors = validateModmailSettings(settings, guild);
+      if (errors.length > 0) {
+        continue;
+      }
+
+      const inboxChannel = guild.channels.cache.get(settings.modmailInboxChannelId);
+      if (!inboxChannel || !inboxChannel.isTextBased()) {
+        continue;
+      }
+
+      await inboxChannel.send({
+        allowedMentions: settings.modmailStaffRoleId
+          ? { parse: [], roles: [settings.modmailStaffRoleId] }
+          : { parse: [] },
+        content: [
+          settings.modmailStaffRoleId ? `<@&${settings.modmailStaffRoleId}>` : "",
+          `📩 **Modmail** from ${message.author.tag} (${message.author.id})`,
+          "",
+          normalizeText(message.content, "(no text content)", 1800),
+        ]
+          .filter(Boolean)
+          .join("\n"),
+      });
+
+      if (settings.modmailAutoReply) {
+        await message.reply(settings.modmailAutoReply).catch(() => null);
+      }
+      return;
+    } catch (error) {
+      console.error(`Failed modmail routing for guild ${guild.id}.`);
+      console.error(error);
+    }
+  }
 }
 
 async function syncStarboardReaction(reaction, user) {
@@ -1059,6 +1466,205 @@ async function syncStarboardReaction(reaction, user) {
   });
 }
 
+const raidTracker = new Map();
+
+async function evaluateAntiRaid(guild, settings) {
+  if (!settings.antiRaidEnabled) {
+    return;
+  }
+
+  const now = Date.now();
+  const windowMs = settings.antiRaidWindowSeconds * 1000;
+  const state = raidTracker.get(guild.id) || { joinTimestamps: [], lockedUntil: 0 };
+  state.joinTimestamps = [...state.joinTimestamps, now].filter((stamp) => now - stamp <= windowMs);
+  raidTracker.set(guild.id, state);
+
+  if (now < state.lockedUntil || state.joinTimestamps.length < settings.antiRaidJoinThreshold) {
+    return;
+  }
+
+  state.lockedUntil = now + settings.antiRaidLockdownMinutes * 60 * 1000;
+  raidTracker.set(guild.id, state);
+
+  const alertChannel = guild.channels.cache.get(settings.antiRaidAlertChannelId);
+  if (alertChannel && alertChannel.isTextBased()) {
+    await alertChannel.send({
+      allowedMentions: { parse: [] },
+      content: `🚨 Anti-raid triggered: ${state.joinTimestamps.length} joins within ${settings.antiRaidWindowSeconds}s. Applying temporary slowmode lockdown for ${settings.antiRaidLockdownMinutes} minute(s).`,
+    });
+  }
+
+  const channels = guild.channels.cache.filter(
+    (channel) => channel && channel.isTextBased() && typeof channel.rateLimitPerUser === "number",
+  );
+  for (const channel of channels.values()) {
+    if (!channel.manageable) {
+      continue;
+    }
+    await channel.setRateLimitPerUser(10, "Blueprint anti-raid lockdown").catch(() => null);
+  }
+
+  setTimeout(async () => {
+    const freshGuild = client.guilds.cache.get(guild.id);
+    if (!freshGuild) {
+      return;
+    }
+    await freshGuild.channels.fetch().catch(() => null);
+    for (const channel of freshGuild.channels.cache.values()) {
+      if (
+        !channel ||
+        !channel.isTextBased() ||
+        typeof channel.rateLimitPerUser !== "number" ||
+        !channel.manageable
+      ) {
+        continue;
+      }
+      await channel.setRateLimitPerUser(0, "Blueprint anti-raid lockdown ended").catch(() => null);
+    }
+  }, settings.antiRaidLockdownMinutes * 60 * 1000);
+}
+
+async function syncTicketPanelsForClient() {
+  for (const guild of client.guilds.cache.values()) {
+    const settings = getGuildSettings(guild.id);
+    if (!settings.ticketsEnabled) {
+      continue;
+    }
+
+    await guild.channels.fetch().catch(() => null);
+    await syncTicketPanel(guild, settings).catch((error) => {
+      console.error(`Failed to sync ticket panel for guild ${guild.id}.`);
+      console.error(error);
+    });
+  }
+}
+
+async function syncReactionRole(reaction, user, isRemoval) {
+  if (user?.bot) {
+    return;
+  }
+
+  const resolvedReaction = await hydrateReaction(reaction);
+  const message = resolvedReaction?.message;
+  if (!message?.guild) {
+    return;
+  }
+
+  const settings = getGuildSettings(message.guild.id);
+  if (
+    !settings.reactionRolesEnabled ||
+    !settings.reactionRolesChannelId ||
+    !settings.reactionRolesMessageId ||
+    !settings.reactionRolesRoleId
+  ) {
+    return;
+  }
+
+  if (
+    message.channelId !== settings.reactionRolesChannelId ||
+    message.id !== settings.reactionRolesMessageId
+  ) {
+    return;
+  }
+
+  const reactionEmoji = resolvedReaction.emoji?.name || resolvedReaction.emoji?.toString?.() || "";
+  if (reactionEmoji !== settings.reactionRolesEmoji) {
+    return;
+  }
+
+  const member = await message.guild.members.fetch(user.id).catch(() => null);
+  if (!member) {
+    return;
+  }
+  const role = message.guild.roles.cache.get(settings.reactionRolesRoleId);
+  if (!role) {
+    return;
+  }
+
+  if (isRemoval && settings.reactionRolesRemoveOnUnreact) {
+    await member.roles.remove(role, "Blueprint reaction role removed").catch(() => null);
+    return;
+  }
+
+  await member.roles.add(role, "Blueprint reaction role assigned").catch(() => null);
+}
+
+async function runMemberJoinAutomation(member, settings) {
+  if (!settings.automationsEnabled || settings.automationsTrigger !== "member_join") {
+    return;
+  }
+
+  await executeAutomationAction(member.guild, settings, {
+    member,
+    source: "member_join",
+  });
+}
+
+async function runKeywordAutomation(message, settings) {
+  if (!settings.automationsEnabled || settings.automationsTrigger !== "keyword") {
+    return;
+  }
+
+  if (!settings.automationsKeyword) {
+    return;
+  }
+
+  if (!String(message.content || "").toLowerCase().includes(settings.automationsKeyword.toLowerCase())) {
+    return;
+  }
+
+  await executeAutomationAction(message.guild, settings, {
+    member: message.member,
+    source: "keyword",
+    message,
+  });
+}
+
+async function runSuggestionAutomation(guild, settings, context = {}) {
+  if (!settings.automationsEnabled || settings.automationsTrigger !== "suggestion_created") {
+    return;
+  }
+
+  await executeAutomationAction(guild, settings, {
+    source: "suggestion_created",
+    context,
+  });
+}
+
+async function executeAutomationAction(guild, settings, payload) {
+  const logChannel = guild.channels.cache.get(settings.automationsLogChannelId);
+  if (!logChannel || !logChannel.isTextBased()) {
+    return;
+  }
+
+  if (settings.automationsAction === "send_message") {
+    await logChannel.send({
+      allowedMentions: { parse: [] },
+      content: `⚙️ Automation fired (${payload.source}).`,
+    });
+    return;
+  }
+
+  if (settings.automationsAction === "create_ticket") {
+    const ticketChannel = guild.channels.cache.get(settings.ticketsIntakeChannelId) || logChannel;
+    if (ticketChannel.isTextBased()) {
+      await ticketChannel.send({
+        allowedMentions: { parse: [] },
+        content: `🎫 Automation created a ticket placeholder (${payload.source}).`,
+      });
+    }
+    return;
+  }
+
+  if (settings.automationsAction === "assign_role" && payload.member && settings.autoRoleRoleId) {
+    await payload.member.roles.add(settings.autoRoleRoleId, "Blueprint automation").catch(() => null);
+    await logChannel.send({
+      allowedMentions: { parse: [] },
+      content: `⚙️ Automation assigned role to ${payload.member.user.tag} (${payload.source}).`,
+    });
+  }
+}
+
 async function removeStarboardEntryForSourceMessage(message) {
   const entry = getStarboardEntry(message.id);
   if (!entry) {
@@ -1101,6 +1707,38 @@ async function hydrateReaction(reaction) {
 
 async function getStarboardChannel(guild, channelId) {
   return guild.channels.cache.get(channelId) || guild.channels.fetch(channelId).catch(() => null);
+}
+
+async function getAiAccessError(discordUserId) {
+  const result = await resolveContinentalUser(discordUserId, config);
+  return getAiAccessRequirementMessage(result, config, "Blueprint AI");
+}
+
+function getAiAvailabilityError(settings) {
+  if (!settings?.aiToolsEnabled) {
+    return "Blueprint AI is disabled in this server.";
+  }
+
+  if (!isAiRuntimeConfigured(config)) {
+    return "Blueprint AI is not configured on this instance yet.";
+  }
+
+  if (!settings.aiToolsChannelId) {
+    return "Blueprint AI needs a dedicated channel before it can be used.";
+  }
+
+  return "";
+}
+
+function formatAiReplyContent(reply) {
+  const answer = clampDiscordMessage(reply?.answer || "No response from the AI service.");
+  if (reply?.mode === "compatibility") {
+    return `AI response (compatibility mode)\n\n${answer}`;
+  }
+  if (reply?.mode === "error") {
+    return `AI service error\n\n${answer}`;
+  }
+  return answer;
 }
 
 function requireAuthPage(request, response, next) {
@@ -1551,6 +2189,15 @@ function normalizeText(value, fallback, maxLength) {
     .slice(0, maxLength);
 
   return trimmed || fallback;
+}
+
+function clampDiscordMessage(value, maxLength = 1900) {
+  const text = String(value || "").trim();
+  if (text.length <= maxLength) {
+    return text || "No additional details.";
+  }
+
+  return `${text.slice(0, Math.max(0, maxLength - 1)).trimEnd()}…`;
 }
 
 function normalizeToken(value) {

@@ -1,3 +1,5 @@
+const { PermissionFlagsBits } = require("discord.js");
+
 const { escapeHtml, renderModuleCard, renderModuleFacts } = require("../html");
 const {
   canSendMessages,
@@ -10,24 +12,17 @@ const defaults = {
   antiRaidEnabled: false,
   antiRaidAlertChannelId: "",
   antiRaidJoinThreshold: 8,
-  antiRaidJoinBurstLimit: 8,
-  antiRaidWindowSeconds: 45,
+  antiRaidWindowSeconds: 20,
   antiRaidLockdownMinutes: 10,
-  antiRaidAction: "flag",
 };
 
 function normalizeAntiRaidSettings(input = {}) {
-  const action = String(input.antiRaidAction || "").trim().toLowerCase();
-  const normalizedAction = action === "slowmode" ? "slowmode" : "flag";
-
   return {
     antiRaidEnabled: input.antiRaidEnabled === true || input.antiRaidEnabled === "on",
     antiRaidAlertChannelId: normalizeId(input.antiRaidAlertChannelId),
     antiRaidJoinThreshold: normalizeInteger(input.antiRaidJoinThreshold, 8, 2, 100),
-    antiRaidJoinBurstLimit: normalizeInteger(input.antiRaidJoinBurstLimit, 8, 3, 50),
-    antiRaidWindowSeconds: normalizeInteger(input.antiRaidWindowSeconds, 45, 10, 600),
+    antiRaidWindowSeconds: normalizeInteger(input.antiRaidWindowSeconds, 20, 5, 300),
     antiRaidLockdownMinutes: normalizeInteger(input.antiRaidLockdownMinutes, 10, 1, 240),
-    antiRaidAction: normalizedAction,
   };
 }
 
@@ -36,8 +31,12 @@ function validateAntiRaidSettings(settings, guild, botMember) {
     return [];
   }
 
+  if (!botMember || !botMember.permissions.has(PermissionFlagsBits.ManageChannels)) {
+    return ["Blueprint needs Manage Channels before anti-raid lockdown can run."];
+  }
+
   if (!settings.antiRaidAlertChannelId) {
-    return ["Select an anti-raid alert channel before enabling this module."];
+    return ["Choose an alert channel before enabling anti-raid."];
   }
 
   const alertChannel = guild.channels.cache.get(settings.antiRaidAlertChannelId);
@@ -68,14 +67,8 @@ function getAntiRaidState(settings, channelOptions = []) {
 }
 
 function getAntiRaidStatusLabel(state) {
-  if (state === "live") {
-    return "Live";
-  }
-
-  if (state === "incomplete") {
-    return "Needs setup";
-  }
-
+  if (state === "live") return "Live";
+  if (state === "incomplete") return "Needs setup";
   return "Disabled";
 }
 
@@ -86,6 +79,9 @@ function renderAntiRaidModuleCard({
   settings,
 }) {
   const state = getAntiRaidState(settings, channelOptions);
+  const statusHtml = `
+    <div class="status-pill status-pill-${state}" data-status-target="antiRaid">${escapeHtml(getAntiRaidStatusLabel(state))}</div>
+  `;
   const channelSelectOptions = [
     `<option value="">Select a channel</option>`,
     ...channelOptions.map((channel) => `
@@ -97,17 +93,14 @@ function renderAntiRaidModuleCard({
     `),
   ].join("");
 
-  const statusHtml = `
-    <div class="status-pill status-pill-${state}" data-status-target="antiRaid">${escapeHtml(getAntiRaidStatusLabel(state))}</div>
-  `;
   const summaryHtml = renderModuleFacts([
     {
       label: "Alert feed",
       valueHtml: escapeHtml(getChannelLabel(settings.antiRaidAlertChannelId, channelOptions)),
     },
     {
-      label: "Trigger",
-      valueHtml: escapeHtml(`${settings.antiRaidJoinBurstLimit} joins / ${settings.antiRaidWindowSeconds}s`),
+      label: "Threshold",
+      valueHtml: escapeHtml(`${settings.antiRaidJoinThreshold} joins / ${settings.antiRaidWindowSeconds}s`),
     },
   ]);
 
@@ -118,24 +111,11 @@ function renderAntiRaidModuleCard({
           <div class="field-grid">
             <label>
               <span>Alert channel</span>
-              <select name="antiRaidAlertChannelId">
-                ${channelSelectOptions}
-              </select>
+              <select name="antiRaidAlertChannelId">${channelSelectOptions}</select>
             </label>
 
             <label>
-              <span>Join burst threshold</span>
-              <input
-                type="number"
-                min="3"
-                max="50"
-                name="antiRaidJoinBurstLimit"
-                value="${escapeHtml(String(settings.antiRaidJoinBurstLimit))}"
-              />
-            </label>
-
-            <label>
-              <span>Legacy join threshold</span>
+              <span>Join spike threshold</span>
               <input
                 type="number"
                 min="2"
@@ -146,18 +126,18 @@ function renderAntiRaidModuleCard({
             </label>
 
             <label>
-              <span>Window (seconds)</span>
+              <span>Detection window (seconds)</span>
               <input
                 type="number"
-                min="10"
-                max="600"
+                min="5"
+                max="300"
                 name="antiRaidWindowSeconds"
                 value="${escapeHtml(String(settings.antiRaidWindowSeconds))}"
               />
             </label>
 
             <label>
-              <span>Lockdown minutes</span>
+              <span>Lockdown duration (minutes)</span>
               <input
                 type="number"
                 min="1"
@@ -165,14 +145,6 @@ function renderAntiRaidModuleCard({
                 name="antiRaidLockdownMinutes"
                 value="${escapeHtml(String(settings.antiRaidLockdownMinutes))}"
               />
-            </label>
-
-            <label>
-              <span>Response mode</span>
-              <select name="antiRaidAction">
-                <option value="flag" ${settings.antiRaidAction === "flag" ? "selected" : ""}>Flag only</option>
-                <option value="slowmode" ${settings.antiRaidAction === "slowmode" ? "selected" : ""}>Flag + suggest slowmode</option>
-              </select>
             </label>
           </div>
         </div>
@@ -182,37 +154,36 @@ function renderAntiRaidModuleCard({
           <div class="countdown-preview">${escapeHtml(getAntiRaidPreview(settings, channelOptions, state))}</div>
           <div class="preview-meta preview-meta-dual">
             <div>
+              <span>Threshold</span>
+              <strong>${escapeHtml(String(settings.antiRaidJoinThreshold))} joins</strong>
+            </div>
+            <div>
               <span>Status</span>
               <strong>${escapeHtml(getAntiRaidStatusLabel(state))}</strong>
             </div>
-            <div>
-              <span>Response</span>
-              <strong>${escapeHtml(settings.antiRaidAction === "slowmode" ? "Escalate" : "Flag")}</strong>
-            </div>
           </div>
-          <p class="preview-note">Blueprint watches for sudden join spikes and alerts moderators with context immediately.</p>
         </aside>
       </div>
     `,
     checked: settings.antiRaidEnabled,
     blockerHtml: escapeHtml(blockerText),
     defaultOpen,
-    descriptionHtml:
-      "Detect unusual join bursts and trigger moderator alerts with configurable thresholds and response guidance.",
+    descriptionHtml: "Detect rapid join spikes and temporarily lock channels during incidents.",
     eyebrow: "Anti-raid",
     inputName: "antiRaidEnabled",
     moduleKey: "antiRaid",
     moduleId: "anti-raid",
     statusHtml,
     summaryHtml,
-    theme: "audit",
-    titleHtml: "Join-spike protection",
+    theme: "auto-moderation",
+    titleHtml: "Raid detection and lockdown",
   });
 }
 
 module.exports = {
   defaults,
   getAntiRaidState,
+  getAntiRaidStatusLabel,
   normalizeAntiRaidSettings,
   renderAntiRaidModuleCard,
   validateAntiRaidSettings,
@@ -220,13 +191,8 @@ module.exports = {
 
 function getAntiRaidPreview(settings, channelOptions, state) {
   if (state !== "live") {
-    return "Anti-raid stays off until an alert channel is selected.";
+    return "Anti-raid requires an alert channel before activation.";
   }
 
-  const responseText =
-    settings.antiRaidAction === "slowmode"
-      ? `Blueprint flags the spike and suggests a ${settings.antiRaidLockdownMinutes}-minute slowdown response.`
-      : "Blueprint flags the spike for moderator review.";
-
-  return `If ${settings.antiRaidJoinBurstLimit} members join within ${settings.antiRaidWindowSeconds} seconds, Blueprint alerts ${getChannelLabel(settings.antiRaidAlertChannelId, channelOptions)}. ${responseText}`;
+  return `If ${settings.antiRaidJoinThreshold} members join in ${settings.antiRaidWindowSeconds}s, Blueprint starts a ${settings.antiRaidLockdownMinutes} minute lockdown and reports to ${getChannelLabel(settings.antiRaidAlertChannelId, channelOptions)}.`;
 }

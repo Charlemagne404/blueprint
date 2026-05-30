@@ -32,35 +32,9 @@ const { getStarboardState, validateStarboardSettings } = require("./starboard");
 const { getTicketState, validateTicketSettings } = require("./tickets");
 const { getWelcomeState, validateWelcomeSettings } = require("./welcome");
 
-const RUNTIME_UNAVAILABLE_MODULES = Object.freeze({
-  aiTools:
-    "AI tools can be configured here, but the bot runtime does not reply in-channel yet. Leave this module off until AI responses are implemented.",
-  antiRaid:
-    "Anti-raid thresholds can be configured here, but join-spike monitoring is not wired into the bot runtime yet.",
-  applications:
-    "Application forms are not wired into the bot runtime yet. Leave this module off until application intake is implemented.",
-  automations:
-    "Automations can be configured here, but no runtime worker executes those rules yet.",
-  leveling:
-    "Leveling settings are available in the dashboard, but XP tracking and level-up messages are not implemented in the bot runtime yet.",
-  modmail:
-    "Modmail can be configured here, but the bot runtime does not open or relay modmail threads yet.",
-  reactionRoles:
-    "Reaction roles are not wired into the bot runtime yet. Leave this module off until role mapping and panel publishing are implemented.",
-  tickets:
-    "Ticket settings can be configured here, but the bot runtime does not open ticket channels yet.",
-});
+const RUNTIME_UNAVAILABLE_MODULES = Object.freeze({});
 
-const MODULE_ENABLEMENT_KEYS = Object.freeze({
-  aiTools: "aiToolsEnabled",
-  antiRaid: "antiRaidEnabled",
-  applications: "applicationsEnabled",
-  automations: "automationsEnabled",
-  leveling: "levelingEnabled",
-  modmail: "modmailEnabled",
-  reactionRoles: "reactionRolesEnabled",
-  tickets: "ticketsEnabled",
-});
+const MODULE_ENABLEMENT_KEYS = Object.freeze({});
 
 function evaluateDashboardModules({
   settings,
@@ -93,23 +67,14 @@ function evaluateDashboardModules({
   const suggestionErrors = canValidate ? validateSuggestionSettings(settings, guild, botMember) : [];
   const ticketErrors = canValidate ? validateTicketSettings(settings, guild, botMember) : [];
   const levelingErrors = canValidate ? validateLevelingSettings(settings, guild, botMember) : [];
-  const reactionRoleErrors = canValidate
-    ? validateReactionRoleSettings(settings, guild, botMember)
-    : [];
+  const reactionRoleErrors = canValidate ? validateReactionRoleSettings(settings, guild) : [];
   const antiRaidErrors = canValidate ? validateAntiRaidSettings(settings, guild, botMember) : [];
-  const automationErrors = canValidate
-    ? validateAutomationSettings(settings, guild, botMember)
-    : [];
-  const modmailErrors = canValidate ? validateModmailSettings(settings, guild, botMember) : [];
-  const applicationErrors = canValidate
-    ? validateApplicationSettings(settings, guild, botMember)
-    : [];
+  const automationErrors = canValidate ? validateAutomationSettings(settings, guild) : [];
+  const modmailErrors = canValidate ? validateModmailSettings(settings, guild) : [];
+  const applicationErrors = canValidate ? validateApplicationSettings(settings, guild) : [];
   const aiToolsErrors = canValidate ? validateAiToolsSettings(settings, guild, botMember) : [];
-  const reactionRoleState = getModuleState(
-    settings.reactionRolesEnabled,
-    getReactionRoleState(settings, channelOptions),
-    runtimeBlockers.reactionRoles,
-  );
+
+  const reactionRoleState = getReactionRoleState(settings, channelOptions);
   const ticketState = getModuleState(
     settings.ticketsEnabled,
     getTicketState(settings, channelOptions, mentionRoleOptions),
@@ -120,31 +85,11 @@ function evaluateDashboardModules({
     getLevelingState(settings, channelOptions),
     runtimeBlockers.leveling,
   );
-  const antiRaidState = getModuleState(
-    settings.antiRaidEnabled,
-    getAntiRaidState(settings, channelOptions),
-    runtimeBlockers.antiRaid,
-  );
-  const automationState = getModuleState(
-    settings.automationsEnabled,
-    getAutomationState(settings, channelOptions),
-    runtimeBlockers.automations,
-  );
-  const modmailState = getModuleState(
-    settings.modmailEnabled,
-    getModmailState(settings, channelOptions, roleOptions),
-    runtimeBlockers.modmail,
-  );
-  const applicationState = getModuleState(
-    settings.applicationsEnabled,
-    getApplicationState(settings, channelOptions, roleOptions),
-    runtimeBlockers.applications,
-  );
-  const aiToolsState = getModuleState(
-    settings.aiToolsEnabled,
-    getAiToolsState(settings, channelOptions),
-    runtimeBlockers.aiTools,
-  );
+  const antiRaidState = getAntiRaidState(settings, channelOptions);
+  const automationState = getAutomationState(settings, channelOptions);
+  const modmailState = getModmailState(settings, channelOptions, roleOptions);
+  const applicationState = getApplicationState(settings, channelOptions, roleOptions);
+  const aiToolsState = getAiToolsState(settings, channelOptions);
 
   return [
     {
@@ -283,10 +228,9 @@ function evaluateDashboardModules({
       blocker:
         !settings.reactionRolesEnabled
           ? ""
-          : runtimeBlockers.reactionRoles ||
-            reactionRoleErrors[0] ||
+          : reactionRoleErrors[0] ||
             (reactionRoleState === "incomplete"
-              ? "Select a reaction role panel channel to finish setup."
+              ? "Select a channel, setup message, and role to finish setup."
               : ""),
     },
     {
@@ -325,8 +269,7 @@ function evaluateDashboardModules({
       blocker:
         !settings.antiRaidEnabled
           ? ""
-          : runtimeBlockers.antiRaid ||
-            antiRaidErrors[0] ||
+          : antiRaidErrors[0] ||
             (antiRaidState === "incomplete"
               ? "Select an anti-raid alert channel to finish setup."
               : ""),
@@ -339,8 +282,7 @@ function evaluateDashboardModules({
       blocker:
         !settings.automationsEnabled
           ? ""
-          : runtimeBlockers.automations ||
-            automationErrors[0] ||
+          : automationErrors[0] ||
             (automationState === "incomplete"
               ? "Choose a trigger, action, and log channel to finish setup."
               : ""),
@@ -353,8 +295,7 @@ function evaluateDashboardModules({
       blocker:
         !settings.modmailEnabled
           ? ""
-          : runtimeBlockers.modmail ||
-            modmailErrors[0] ||
+          : modmailErrors[0] ||
             (modmailState === "incomplete"
               ? "Select an inbox channel and staff role to finish setup."
               : ""),
@@ -367,8 +308,7 @@ function evaluateDashboardModules({
       blocker:
         !settings.applicationsEnabled
           ? ""
-          : runtimeBlockers.applications ||
-            applicationErrors[0] ||
+          : applicationErrors[0] ||
             (applicationState === "incomplete"
               ? "Select a destination channel and reviewer role to finish setup."
               : ""),
@@ -381,8 +321,7 @@ function evaluateDashboardModules({
       blocker:
         !settings.aiToolsEnabled
           ? ""
-          : runtimeBlockers.aiTools ||
-            aiToolsErrors[0] ||
+          : aiToolsErrors[0] ||
             (aiToolsState === "incomplete"
               ? "Select a dedicated AI tools channel to finish setup."
               : ""),

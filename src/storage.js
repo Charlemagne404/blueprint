@@ -96,16 +96,15 @@ db.exec(`
     reaction_roles_enabled INTEGER NOT NULL DEFAULT 0,
     reaction_roles_channel_id TEXT NOT NULL DEFAULT '',
     reaction_roles_message_id TEXT NOT NULL DEFAULT '',
-    reaction_roles_prompt TEXT NOT NULL DEFAULT 'Pick your roles from the reaction menu below.',
-    reaction_roles_max_per_member INTEGER NOT NULL DEFAULT 3,
+    reaction_roles_role_id TEXT NOT NULL DEFAULT '',
+    reaction_roles_emoji TEXT NOT NULL DEFAULT '⭐',
+    reaction_roles_max_per_member INTEGER NOT NULL DEFAULT 1,
     reaction_roles_remove_on_unreact INTEGER NOT NULL DEFAULT 1,
     anti_raid_enabled INTEGER NOT NULL DEFAULT 0,
     anti_raid_alert_channel_id TEXT NOT NULL DEFAULT '',
     anti_raid_join_threshold INTEGER NOT NULL DEFAULT 8,
-    anti_raid_join_burst_limit INTEGER NOT NULL DEFAULT 8,
-    anti_raid_window_seconds INTEGER NOT NULL DEFAULT 45,
+    anti_raid_window_seconds INTEGER NOT NULL DEFAULT 20,
     anti_raid_lockdown_minutes INTEGER NOT NULL DEFAULT 10,
-    anti_raid_action TEXT NOT NULL DEFAULT 'flag',
     automations_enabled INTEGER NOT NULL DEFAULT 0,
     automations_log_channel_id TEXT NOT NULL DEFAULT '',
     automations_trigger TEXT NOT NULL DEFAULT 'member_join',
@@ -152,6 +151,36 @@ db.exec(`
     starboard_channel_id TEXT NOT NULL,
     starboard_message_id TEXT NOT NULL,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )
+`);
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS leveling_member_stats (
+    guild_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    xp INTEGER NOT NULL DEFAULT 0,
+    level INTEGER NOT NULL DEFAULT 0,
+    last_message_at TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (guild_id, user_id)
+  )
+`);
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS ticket_runtime_state (
+    guild_id TEXT PRIMARY KEY,
+    panel_channel_id TEXT NOT NULL DEFAULT '',
+    panel_message_id TEXT NOT NULL DEFAULT ''
+  )
+`);
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS ticket_open_tickets (
+    guild_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    channel_id TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (guild_id, user_id),
+    UNIQUE (guild_id, channel_id)
   )
 `);
 
@@ -217,19 +246,15 @@ ensureColumn("leveling_level_up_message", "TEXT NOT NULL DEFAULT 'GG {mention}, 
 ensureColumn("reaction_roles_enabled", "INTEGER NOT NULL DEFAULT 0");
 ensureColumn("reaction_roles_channel_id", "TEXT NOT NULL DEFAULT ''");
 ensureColumn("reaction_roles_message_id", "TEXT NOT NULL DEFAULT ''");
-ensureColumn(
-  "reaction_roles_prompt",
-  "TEXT NOT NULL DEFAULT 'Pick your roles from the reaction menu below.'",
-);
-ensureColumn("reaction_roles_max_per_member", "INTEGER NOT NULL DEFAULT 3");
+ensureColumn("reaction_roles_role_id", "TEXT NOT NULL DEFAULT ''");
+ensureColumn("reaction_roles_emoji", "TEXT NOT NULL DEFAULT '⭐'");
+ensureColumn("reaction_roles_max_per_member", "INTEGER NOT NULL DEFAULT 1");
 ensureColumn("reaction_roles_remove_on_unreact", "INTEGER NOT NULL DEFAULT 1");
 ensureColumn("anti_raid_enabled", "INTEGER NOT NULL DEFAULT 0");
 ensureColumn("anti_raid_alert_channel_id", "TEXT NOT NULL DEFAULT ''");
 ensureColumn("anti_raid_join_threshold", "INTEGER NOT NULL DEFAULT 8");
-ensureColumn("anti_raid_join_burst_limit", "INTEGER NOT NULL DEFAULT 8");
-ensureColumn("anti_raid_window_seconds", "INTEGER NOT NULL DEFAULT 45");
+ensureColumn("anti_raid_window_seconds", "INTEGER NOT NULL DEFAULT 20");
 ensureColumn("anti_raid_lockdown_minutes", "INTEGER NOT NULL DEFAULT 10");
-ensureColumn("anti_raid_action", "TEXT NOT NULL DEFAULT 'flag'");
 ensureColumn("automations_enabled", "INTEGER NOT NULL DEFAULT 0");
 ensureColumn("automations_log_channel_id", "TEXT NOT NULL DEFAULT ''");
 ensureColumn("automations_trigger", "TEXT NOT NULL DEFAULT 'member_join'");
@@ -366,7 +391,8 @@ function getGuildSettings(guildId) {
     reactionRolesEnabled: Boolean(row.reaction_roles_enabled),
     reactionRolesChannelId: row.reaction_roles_channel_id,
     reactionRolesMessageId: row.reaction_roles_message_id,
-    reactionRolesPrompt: row.reaction_roles_prompt || reactionRoleDefaults.reactionRolesPrompt,
+    reactionRolesRoleId: row.reaction_roles_role_id,
+    reactionRolesEmoji: row.reaction_roles_emoji || reactionRoleDefaults.reactionRolesEmoji,
     reactionRolesMaxPerMember: normalizeInteger(
       row.reaction_roles_max_per_member,
       reactionRoleDefaults.reactionRolesMaxPerMember,
@@ -378,10 +404,6 @@ function getGuildSettings(guildId) {
       row.anti_raid_join_threshold,
       antiRaidDefaults.antiRaidJoinThreshold,
     ),
-    antiRaidJoinBurstLimit: normalizeInteger(
-      row.anti_raid_join_burst_limit,
-      antiRaidDefaults.antiRaidJoinBurstLimit,
-    ),
     antiRaidWindowSeconds: normalizeInteger(
       row.anti_raid_window_seconds,
       antiRaidDefaults.antiRaidWindowSeconds,
@@ -390,7 +412,6 @@ function getGuildSettings(guildId) {
       row.anti_raid_lockdown_minutes,
       antiRaidDefaults.antiRaidLockdownMinutes,
     ),
-    antiRaidAction: row.anti_raid_action || antiRaidDefaults.antiRaidAction,
     automationsEnabled: Boolean(row.automations_enabled),
     automationsLogChannelId: row.automations_log_channel_id,
     automationsTrigger: row.automations_trigger || "member_join",
@@ -483,16 +504,15 @@ function saveGuildSettings(guildId, settings, updatedByUserId) {
     settings.reactionRolesEnabled ? 1 : 0,
     settings.reactionRolesChannelId,
     settings.reactionRolesMessageId,
-    settings.reactionRolesPrompt,
+    settings.reactionRolesRoleId,
+    settings.reactionRolesEmoji,
     settings.reactionRolesMaxPerMember,
     settings.reactionRolesRemoveOnUnreact ? 1 : 0,
     settings.antiRaidEnabled ? 1 : 0,
     settings.antiRaidAlertChannelId,
     settings.antiRaidJoinThreshold,
-    settings.antiRaidJoinBurstLimit,
     settings.antiRaidWindowSeconds,
     settings.antiRaidLockdownMinutes,
-    settings.antiRaidAction,
     settings.automationsEnabled ? 1 : 0,
     settings.automationsLogChannelId,
     settings.automationsTrigger,
@@ -578,16 +598,15 @@ function saveGuildSettings(guildId, settings, updatedByUserId) {
       reaction_roles_enabled,
       reaction_roles_channel_id,
       reaction_roles_message_id,
-      reaction_roles_prompt,
+      reaction_roles_role_id,
+      reaction_roles_emoji,
       reaction_roles_max_per_member,
       reaction_roles_remove_on_unreact,
       anti_raid_enabled,
       anti_raid_alert_channel_id,
       anti_raid_join_threshold,
-      anti_raid_join_burst_limit,
       anti_raid_window_seconds,
       anti_raid_lockdown_minutes,
-      anti_raid_action,
       automations_enabled,
       automations_log_channel_id,
       automations_trigger,
@@ -671,16 +690,15 @@ function saveGuildSettings(guildId, settings, updatedByUserId) {
       reaction_roles_enabled = excluded.reaction_roles_enabled,
       reaction_roles_channel_id = excluded.reaction_roles_channel_id,
       reaction_roles_message_id = excluded.reaction_roles_message_id,
-      reaction_roles_prompt = excluded.reaction_roles_prompt,
+      reaction_roles_role_id = excluded.reaction_roles_role_id,
+      reaction_roles_emoji = excluded.reaction_roles_emoji,
       reaction_roles_max_per_member = excluded.reaction_roles_max_per_member,
       reaction_roles_remove_on_unreact = excluded.reaction_roles_remove_on_unreact,
       anti_raid_enabled = excluded.anti_raid_enabled,
       anti_raid_alert_channel_id = excluded.anti_raid_alert_channel_id,
       anti_raid_join_threshold = excluded.anti_raid_join_threshold,
-      anti_raid_join_burst_limit = excluded.anti_raid_join_burst_limit,
       anti_raid_window_seconds = excluded.anti_raid_window_seconds,
       anti_raid_lockdown_minutes = excluded.anti_raid_lockdown_minutes,
-      anti_raid_action = excluded.anti_raid_action,
       automations_enabled = excluded.automations_enabled,
       automations_log_channel_id = excluded.automations_log_channel_id,
       automations_trigger = excluded.automations_trigger,
@@ -714,15 +732,25 @@ function clearCountdownAlertLastSentOn(guildId) {
 module.exports = {
   checkStorageHealth,
   clearCountdownAlertLastSentOn,
+  clearTicketPanelState,
+  closeTicketForChannel,
+  closeTicketForUser,
   deleteStarboardEntry,
   defaults,
   getNextSuggestionNumber,
   getCountdownAlertLastSentOn,
   getGuildSettings,
+  getLevelingMemberStats,
   getStarboardEntry,
+  getTicketByChannel,
+  getTicketByUser,
+  getTicketPanelState,
   saveGuildSettings,
   setCountdownAlertLastSentOn,
+  setTicketPanelState,
+  upsertLevelingMemberStats,
   upsertStarboardEntry,
+  upsertTicket,
 };
 
 function checkStorageHealth() {
@@ -765,6 +793,159 @@ function getNextSuggestionNumber(guildId) {
     .get(guildId);
 
   return row?.last_number || 1;
+}
+
+function getLevelingMemberStats(guildId, userId) {
+  const row = db
+    .prepare(`
+      SELECT xp, level, last_message_at
+      FROM leveling_member_stats
+      WHERE guild_id = ? AND user_id = ?
+    `)
+    .get(guildId, userId);
+
+  if (!row) {
+    return {
+      lastMessageAt: "",
+      level: 0,
+      xp: 0,
+    };
+  }
+
+  return {
+    lastMessageAt: row.last_message_at,
+    level: normalizeInteger(row.level, 0),
+    xp: normalizeInteger(row.xp, 0),
+  };
+}
+
+function upsertLevelingMemberStats(guildId, userId, stats) {
+  db.prepare(`
+    INSERT INTO leveling_member_stats (
+      guild_id,
+      user_id,
+      xp,
+      level,
+      last_message_at
+    ) VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT(guild_id, user_id) DO UPDATE SET
+      xp = excluded.xp,
+      level = excluded.level,
+      last_message_at = excluded.last_message_at
+  `).run(
+    guildId,
+    userId,
+    normalizeInteger(stats.xp, 0),
+    normalizeInteger(stats.level, 0),
+    stats.lastMessageAt || "",
+  );
+
+  return getLevelingMemberStats(guildId, userId);
+}
+
+function getTicketPanelState(guildId) {
+  const row = db
+    .prepare(`
+      SELECT panel_channel_id, panel_message_id
+      FROM ticket_runtime_state
+      WHERE guild_id = ?
+    `)
+    .get(guildId);
+
+  return {
+    panelChannelId: row?.panel_channel_id || "",
+    panelMessageId: row?.panel_message_id || "",
+  };
+}
+
+function setTicketPanelState(guildId, panelChannelId, panelMessageId) {
+  db.prepare(`
+    INSERT INTO ticket_runtime_state (
+      guild_id,
+      panel_channel_id,
+      panel_message_id
+    ) VALUES (?, ?, ?)
+    ON CONFLICT(guild_id) DO UPDATE SET
+      panel_channel_id = excluded.panel_channel_id,
+      panel_message_id = excluded.panel_message_id
+  `).run(guildId, panelChannelId || "", panelMessageId || "");
+
+  return getTicketPanelState(guildId);
+}
+
+function clearTicketPanelState(guildId) {
+  db.prepare("DELETE FROM ticket_runtime_state WHERE guild_id = ?").run(guildId);
+}
+
+function getTicketByUser(guildId, userId) {
+  const row = db
+    .prepare(`
+      SELECT channel_id, created_at
+      FROM ticket_open_tickets
+      WHERE guild_id = ? AND user_id = ?
+    `)
+    .get(guildId, userId);
+
+  if (!row) {
+    return null;
+  }
+
+  return {
+    channelId: row.channel_id,
+    createdAt: row.created_at,
+    guildId,
+    userId,
+  };
+}
+
+function getTicketByChannel(guildId, channelId) {
+  const row = db
+    .prepare(`
+      SELECT user_id, created_at
+      FROM ticket_open_tickets
+      WHERE guild_id = ? AND channel_id = ?
+    `)
+    .get(guildId, channelId);
+
+  if (!row) {
+    return null;
+  }
+
+  return {
+    channelId,
+    createdAt: row.created_at,
+    guildId,
+    userId: row.user_id,
+  };
+}
+
+function upsertTicket(guildId, userId, channelId) {
+  db.prepare(`
+    INSERT INTO ticket_open_tickets (
+      guild_id,
+      user_id,
+      channel_id
+    ) VALUES (?, ?, ?)
+    ON CONFLICT(guild_id, user_id) DO UPDATE SET
+      channel_id = excluded.channel_id,
+      created_at = CURRENT_TIMESTAMP
+  `).run(guildId, userId, channelId);
+
+  return getTicketByUser(guildId, userId);
+}
+
+function closeTicketForUser(guildId, userId) {
+  db.prepare(`
+    DELETE FROM ticket_open_tickets
+    WHERE guild_id = ? AND user_id = ?
+  `).run(guildId, userId);
+}
+
+function closeTicketForChannel(guildId, channelId) {
+  db.prepare(`
+    DELETE FROM ticket_open_tickets
+    WHERE guild_id = ? AND channel_id = ?
+  `).run(guildId, channelId);
 }
 
 function getStarboardEntry(sourceMessageId) {
