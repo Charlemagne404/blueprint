@@ -177,24 +177,259 @@ function renderLayout({
 </html>`;
 }
 
-function renderHome({ authConfig, sessionUser }) {
-  const primaryAction = sessionUser
-    ? `<a class="button" href="/dashboard">Open dashboard</a>`
-    : `<button class="button" id="login-button" type="button">Sign in with Continental ID</button>`;
+function renderDashboardAction(action) {
+  if (!action) {
+    return "";
+  }
+
+  const className = action.variant === "ghost" ? "button button-ghost" : "button";
+  if (action.type === "button") {
+    return `
+      <button
+        class="${className}"
+        ${action.id ? `id="${escapeHtml(action.id)}"` : ""}
+        type="${escapeHtml(action.buttonType || "button")}"
+      >
+        ${escapeHtml(action.label)}
+      </button>
+    `;
+  }
+
+  return `
+    <a
+      class="${className}"
+      href="${escapeHtml(action.href)}"
+      ${action.newTab ? 'target="_blank" rel="noopener noreferrer"' : ""}
+    >
+      ${escapeHtml(action.label)}
+    </a>
+  `;
+}
+
+function getDashboardOnboardingState({
+  addBotUrl,
+  attentionServers = 0,
+  discordLinked = false,
+  guildCount = 0,
+  sessionUser,
+}) {
+  const installedLabel = `${guildCount} installed server${guildCount === 1 ? "" : "s"}`;
+  const attentionLabel = `${attentionServers} need setup`;
+
+  if (!sessionUser) {
+    return {
+      dashboardCopy:
+        "Sign in first, then link Discord and install Blueprint in a server you manage.",
+      dashboardEyebrow: "Get started",
+      dashboardTitle: "Open Blueprint by signing in first",
+      headline: "Run Blueprint from one polished server dashboard.",
+      key: "signed-out",
+      lede:
+        "Sign in with Continental ID to unlock the dashboard, link Discord, and manage installed servers without burying staff inside long slash commands.",
+      primaryAction: {
+        id: "login-button",
+        label: "Sign in with Continental ID",
+        type: "button",
+      },
+      progressLabel: "Start with sign-in",
+      progressText: "Blueprint setup starts with your Continental ID session.",
+      secondaryAction: {
+        href: "/dashboard",
+        label: "View installed servers",
+        type: "link",
+        variant: "ghost",
+      },
+      stats: [],
+      steps: [
+        { label: "Sign in with Continental ID", status: "current", statusLabel: "Start" },
+        { label: "Link the Discord account you use to manage servers", status: "pending", statusLabel: "Next" },
+        { label: "Install Blueprint in a server and finish setup", status: "pending", statusLabel: "Later" },
+      ],
+    };
+  }
+
+  if (!discordLinked) {
+    return {
+      dashboardCopy:
+        "Blueprint can only match you to manageable servers after the Discord account on your Continental ID profile is linked.",
+      dashboardEyebrow: "Link Discord",
+      dashboardTitle: "Link Discord before you load the server dashboard",
+      headline: "Link Discord before you open server setup.",
+      key: "discord-unlinked",
+      lede:
+        "Your Continental ID session is active. The next step is linking the Discord account tied to the servers you manage so Blueprint can load the right dashboard access.",
+      primaryAction: {
+        id: "connect-discord-button",
+        label: "Link Discord",
+        type: "button",
+      },
+      progressLabel: "Step 2 of 3",
+      progressText: "Finish account linking, then Blueprint can load the servers you manage.",
+      secondaryAction: {
+        href: "/dashboard",
+        label: "Open dashboard",
+        type: "link",
+        variant: "ghost",
+      },
+      stats: [],
+      steps: [
+        { label: "Continental ID session is active", status: "complete", statusLabel: "Done" },
+        { label: "Link the Discord account you manage servers with", status: "current", statusLabel: "Now" },
+        { label: "Install Blueprint in a server and continue setup", status: "pending", statusLabel: "Next" },
+      ],
+    };
+  }
+
+  if (guildCount === 0) {
+    return {
+      dashboardCopy:
+        "Your Discord account is linked. Add Blueprint to a server you manage, then return here to configure modules.",
+      dashboardEyebrow: "Install Blueprint",
+      dashboardTitle: "Add Blueprint to a server you manage",
+      headline: "Install Blueprint in your first server.",
+      key: "no-servers",
+      lede:
+        "Account linking is done. The next step is adding Blueprint to a Discord server where you have setup rights so the dashboard can load a real server workspace.",
+      primaryAction: {
+        href: addBotUrl,
+        label: "Add bot to a server",
+        type: "link",
+      },
+      progressLabel: "Final setup step",
+      progressText: "Install the bot in Discord, then return here to continue configuration.",
+      secondaryAction: {
+        href: "/dashboard",
+        label: "Open dashboard",
+        type: "link",
+        variant: "ghost",
+      },
+      stats: [
+        { label: "Discord link", value: "Ready" },
+      ],
+      steps: [
+        { label: "Continental ID session is active", status: "complete", statusLabel: "Done" },
+        { label: "Discord account is linked", status: "complete", statusLabel: "Done" },
+        { label: "Install Blueprint in a server you manage", status: "current", statusLabel: "Now" },
+      ],
+    };
+  }
+
+  return {
+    dashboardCopy:
+      attentionServers > 0
+        ? "Servers that still need attention are already sorted to the top so you can resume setup first."
+        : "Every installed server is ready for routine edits, module changes, and expansion from one place.",
+    dashboardEyebrow: "Installed servers",
+    dashboardTitle:
+      attentionServers > 0
+        ? "Start with the servers that still need attention"
+        : "Choose a server and keep configuring modules",
+    headline:
+      attentionServers > 0
+        ? "Continue setup where your servers still need attention."
+        : "Open Blueprint and manage your installed servers.",
+    key: "servers-ready",
+    lede:
+      attentionServers > 0
+        ? `${attentionServers} of your ${installedLabel} still have unfinished module setup. Blueprint surfaces those first so you can keep moving without hunting for the next task.`
+        : `Your ${installedLabel} are ready in Blueprint. Open the dashboard to adjust modules, refine settings, or add more servers over time.`,
+    primaryAction: {
+      href: "/dashboard",
+      label: "Open dashboard",
+      type: "link",
+    },
+    progressLabel: attentionServers > 0 ? attentionLabel : "Ready to configure",
+    progressText:
+      attentionServers > 0
+        ? "Resume the next unfinished module directly from the dashboard."
+        : "Open any installed server and keep refining its module setup.",
+    secondaryAction: {
+      href: addBotUrl,
+      label: "Add bot to another server",
+      type: "link",
+      variant: "ghost",
+    },
+    stats: [
+      { label: "Installed", value: String(guildCount) },
+      { label: "Need setup", value: String(attentionServers) },
+      { label: "Ready", value: String(Math.max(guildCount - attentionServers, 0)) },
+    ],
+    steps: [
+      { label: "Continental ID session is active", status: "complete", statusLabel: "Done" },
+      { label: "Discord account is linked", status: "complete", statusLabel: "Done" },
+      {
+        label:
+          attentionServers > 0
+            ? "Continue the remaining module setup in your servers"
+            : "Open a server dashboard and keep configuring modules",
+        status: "current",
+        statusLabel: attentionServers > 0 ? "Resume" : "Open",
+      },
+    ],
+  };
+}
+
+function renderOnboardingSteps(onboardingState) {
+  return onboardingState.steps
+    .map((step) => `
+      <li class="onboarding-step onboarding-step-${escapeHtml(step.status)}">
+        <span class="onboarding-step-copy">${escapeHtml(step.label)}</span>
+        <span class="onboarding-step-status">${escapeHtml(step.statusLabel)}</span>
+      </li>
+    `)
+    .join("");
+}
+
+function renderOnboardingStats(onboardingState) {
+  if (!onboardingState.stats || onboardingState.stats.length === 0) {
+    return "";
+  }
+
+  return `
+    <div class="onboarding-stats" aria-label="Setup status">
+      ${onboardingState.stats
+        .map((stat) => `
+          <span class="dashboard-summary-pill">
+            <strong>${escapeHtml(stat.value)}</strong>
+            <span>${escapeHtml(stat.label)}</span>
+          </span>
+        `)
+        .join("")}
+    </div>
+  `;
+}
+
+function renderHome({ addBotUrl, authConfig, guilds = [], sessionUser }) {
+  const attentionServers = guilds.filter((guild) => guild.attentionCount > 0).length;
+  const onboardingState = getDashboardOnboardingState({
+    addBotUrl,
+    attentionServers,
+    discordLinked: Boolean(sessionUser?.discordLinked),
+    guildCount: guilds.length,
+    sessionUser,
+  });
 
   const body = `
     <main class="hero home-page" id="main-content">
       <section class="hero-copy">
         <p class="eyebrow">Dashboard-first Discord control center</p>
-        <h1>Run Blueprint from one polished server dashboard.</h1>
-        <p class="lede">
-          Enable modules, fix setup gaps, and manage welcome flows, countdowns, moderation,
-          announcements, highlights, and community tools without burying staff inside long slash commands.
-        </p>
+        <h1>${escapeHtml(onboardingState.headline)}</h1>
+        <p class="lede">${escapeHtml(onboardingState.lede)}</p>
         <div class="hero-actions">
-          ${primaryAction}
-          <a class="button button-ghost" href="/dashboard">View installed servers</a>
+          ${renderDashboardAction(onboardingState.primaryAction)}
+          ${renderDashboardAction(onboardingState.secondaryAction)}
         </div>
+        <section class="settings-card onboarding-panel onboarding-panel-home">
+          <div class="onboarding-panel-copy">
+            <p class="eyebrow">Next required step</p>
+            <h2>${escapeHtml(onboardingState.progressLabel)}</h2>
+            <p class="card-copy">${escapeHtml(onboardingState.progressText)}</p>
+            ${renderOnboardingStats(onboardingState)}
+          </div>
+          <ol class="onboarding-checklist">
+            ${renderOnboardingSteps(onboardingState)}
+          </ol>
+        </section>
         <div class="hero-metrics">
           <article class="hero-metric">
             <span class="hero-metric-label">Built for</span>
@@ -325,6 +560,13 @@ function renderDashboard({
   });
   const attentionServers = sortedGuilds.filter((guild) => guild.attentionCount > 0).length;
   const readyServers = sortedGuilds.filter((guild) => guild.enabledCount > 0 && guild.attentionCount === 0).length;
+  const onboardingState = getDashboardOnboardingState({
+    addBotUrl,
+    attentionServers,
+    discordLinked,
+    guildCount: sortedGuilds.length,
+    sessionUser,
+  });
   const cards = sortedGuilds
     .map((guild) => {
       const icon = guild.iconUrl
@@ -355,14 +597,12 @@ function renderDashboard({
           : "Open this server and start enabling modules from the dashboard.";
 
       return `
-        <article
+        <a
           class="server-card ${guild.attentionCount > 0 ? "server-card-alert" : ""}"
+          href="${href}"
           data-guild-card
           data-guild-attention="${guild.attentionCount > 0 ? "true" : "false"}"
-          data-card-link="${href}"
           data-guild-name="${escapeHtml(guild.name.toLowerCase())}"
-          role="link"
-          tabindex="0"
           aria-label="${escapeHtml(`${actionLabel} for ${guild.name}`)}"
         >
           <div class="server-card-meta-row">
@@ -385,62 +625,70 @@ function renderDashboard({
           </div>
           <div class="server-card-actions">
             <span class="server-card-action-label">${guild.attentionCount > 0 ? "Prioritized first" : "Ready when you are"}</span>
-            <a class="button" href="${href}">${actionLabel}</a>
+            <span class="server-card-action-text">${escapeHtml(actionLabel)}</span>
           </div>
-        </article>
+        </a>
       `;
     })
     .join("");
 
-  const discordNotice = discordLinked
-    ? ""
-    : `
-      <div class="notice">
-        <strong>Discord account not linked.</strong>
-        <p>
-          Link Discord on your Continental ID account first, then this dashboard can match
-          you against the servers where the bot is installed.
-        </p>
-        <div class="notice-actions">
-          <button class="button" id="connect-discord-button" type="button">Link Discord</button>
-        </div>
-      </div>
-    `;
-
-  const emptyState = discordLinked
-    ? "No manageable installed servers were found for your linked Discord account."
-    : "Link your Discord account to load manageable servers.";
+  const showOnboardingPanel = !discordLinked || sortedGuilds.length === 0;
+  const showServerControls = discordLinked && sortedGuilds.length > 0;
 
   const body = `
     <main class="dashboard-page" id="main-content">
       <section class="section-header">
         <div>
-          <p class="eyebrow">Installed servers</p>
-          <h1>Choose a server</h1>
-          <p class="section-copy">
-            Servers with unfinished modules are surfaced first so you can pick up setup work
-            without hunting for it.
-          </p>
+          <p class="eyebrow">${escapeHtml(onboardingState.dashboardEyebrow)}</p>
+          <h1>${escapeHtml(onboardingState.dashboardTitle)}</h1>
+          <p class="section-copy">${escapeHtml(onboardingState.dashboardCopy)}</p>
         </div>
         <div class="section-actions">
-          <a class="button button-ghost" href="${addBotUrl}">Add bot to a server</a>
+          ${renderDashboardAction(
+            showServerControls ? onboardingState.secondaryAction : onboardingState.primaryAction,
+          )}
         </div>
       </section>
-      <section class="settings-card dashboard-spotlight ${guilds.length ? "" : "is-hidden"}">
+      ${
+        showOnboardingPanel
+          ? `
+            <section class="settings-card onboarding-panel onboarding-panel-dashboard">
+              <div class="onboarding-panel-copy">
+                <p class="eyebrow">Next required step</p>
+                <h2>${escapeHtml(onboardingState.progressLabel)}</h2>
+                <p class="card-copy">${escapeHtml(onboardingState.progressText)}</p>
+                ${renderOnboardingStats(onboardingState)}
+                <div class="onboarding-panel-actions">
+                  ${renderDashboardAction(onboardingState.primaryAction)}
+                  ${
+                    onboardingState.secondaryAction && onboardingState.key !== "discord-unlinked"
+                      ? renderDashboardAction(onboardingState.secondaryAction)
+                      : ""
+                  }
+                </div>
+              </div>
+              <ol class="onboarding-checklist">
+                ${renderOnboardingSteps(onboardingState)}
+              </ol>
+            </section>
+          `
+          : ""
+      }
+      <section class="settings-card dashboard-spotlight ${showServerControls ? "" : "is-hidden"}">
         <div class="dashboard-spotlight-copy">
           <p class="eyebrow">Setup overview</p>
-          <h2>Start with the servers that still need attention.</h2>
+          <h2>${escapeHtml(onboardingState.dashboardTitle)}</h2>
           <p class="card-copy">
-            Blueprint sorts unfinished servers to the top and keeps the rest ready for routine edits.
+            ${escapeHtml(onboardingState.dashboardCopy)}
           </p>
         </div>
         <div class="dashboard-spotlight-stats">
-          <span class="dashboard-summary-pill">${guilds.length} installed</span>
+          <span class="dashboard-summary-pill">${sortedGuilds.length} installed</span>
           <span class="dashboard-summary-pill">${attentionServers} need setup</span>
           <span class="dashboard-summary-pill">${readyServers} ready</span>
         </div>
       </section>
-      <section class="dashboard-toolbar ${guilds.length ? "" : "is-hidden"}">
+      <section class="dashboard-toolbar ${showServerControls ? "" : "is-hidden"}">
         <label class="search-field">
           <span class="search-field-label">Search servers</span>
           <input
@@ -455,18 +703,23 @@ function renderDashboard({
             <span>Show attention only</span>
           </label>
           <div class="dashboard-summary">
-            <span class="dashboard-summary-pill">${guilds.length} servers</span>
+            <span class="dashboard-summary-pill">${sortedGuilds.length} servers</span>
             <span class="dashboard-summary-pill">${attentionServers} need setup</span>
           </div>
         </div>
       </section>
-      ${discordNotice}
-      <section class="server-grid">
-        ${cards || `<div class="empty-state">${escapeHtml(emptyState)}</div>`}
-      </section>
-      <div class="empty-state is-hidden" data-guild-search-empty>
-        No servers match the current search and filter.
-      </div>
+      ${
+        showServerControls
+          ? `
+            <section class="server-grid">
+              ${cards}
+            </section>
+            <div class="empty-state is-hidden" data-guild-search-empty>
+              No servers match the current search and filter.
+            </div>
+          `
+          : ""
+      }
     </main>
   `;
 
@@ -499,6 +752,8 @@ function renderGuildSettings({
   const moduleIndexHtml = renderModuleIndex(pageMeta?.modules || []);
   const firstBlockedModule = (pageMeta?.modules || []).find((module) => module.blocker);
   const firstBlockedModuleId = firstBlockedModule ? getModuleSectionId(firstBlockedModule.key) : "";
+  const firstBlockedModuleLabel = firstBlockedModule?.label || "";
+  const firstBlockedModuleBlocker = firstBlockedModule?.blocker || "";
   const selectedWeekdays = new Set(settings.countdownWeekdays || []);
   const hasSavedCountdown = Boolean(
     settings.countdownEnabled ||
@@ -620,30 +875,46 @@ function renderGuildSettings({
         </article>
       </section>
 
-      <section class="settings-card module-index-card">
-        <div class="card-header card-header-spread">
-          <div>
-            <p class="eyebrow">Module map</p>
-            <h2>Jump straight to the work that matters.</h2>
-            <p class="card-copy">
-              Every module stays independently configurable, with its current state surfaced here first.
+      <section
+        class="settings-card setup-rail ${firstBlockedModuleId ? "has-issues" : "is-clear"}"
+        data-setup-rail
+      >
+        <div class="setup-rail-head">
+          <div class="setup-rail-copy">
+            <p class="eyebrow">Setup flow</p>
+            <h2 data-next-issue-label>
+              ${
+                firstBlockedModuleId
+                  ? `Resolve ${escapeHtml(firstBlockedModuleLabel)} next`
+                  : "All enabled modules are configured"
+              }
+            </h2>
+            <p class="card-copy" data-next-issue-copy>
+              ${
+                firstBlockedModuleId
+                  ? escapeHtml(firstBlockedModuleBlocker)
+                  : "Use the module shortcuts below to review settings, make edits, and save when you are ready."
+              }
             </p>
           </div>
-          ${
-            firstBlockedModuleId
-              ? `
-                <button
-                  class="button button-ghost"
-                  type="button"
-                  data-review-issues
-                >
-                  Review first issue
-                </button>
-              `
-              : ""
-          }
+          <div class="setup-rail-actions">
+            <span class="dashboard-summary-pill" data-setup-issue-count>
+              ${
+                pageMeta?.attentionModules
+                  ? `${escapeHtml(String(pageMeta.attentionModules))} issue${pageMeta.attentionModules === 1 ? "" : "s"}`
+                  : "All configured"
+              }
+            </span>
+            <button
+              class="button ${firstBlockedModuleId ? "" : "is-hidden"}"
+              type="button"
+              data-review-issues
+            >
+              Review next issue
+            </button>
+          </div>
         </div>
-        <div class="module-index-grid">
+        <div class="module-index-strip" aria-label="Module shortcuts">
           ${moduleIndexHtml}
         </div>
       </section>
@@ -675,12 +946,21 @@ function renderGuildSettings({
         aria-live="polite"
       >
         <div class="notice-head">
-          <strong>Modules needing attention</strong>
+          <div class="validation-summary-copy">
+            <strong>Issue queue</strong>
+            <p class="card-copy" data-validation-lead>
+              ${
+                firstBlockedModuleId
+                  ? `Start with ${escapeHtml(firstBlockedModuleLabel)}: ${escapeHtml(firstBlockedModuleBlocker)}`
+                  : "Every enabled module is configured."
+              }
+            </p>
+          </div>
           ${
             firstBlockedModuleId
               ? `
                 <div class="notice-actions">
-                  <button class="button button-ghost" type="button" data-review-issues>
+                  <button class="button" type="button" data-review-issues>
                     Jump to first issue
                   </button>
                   <button class="button button-ghost" type="button" data-expand-issues>
@@ -1595,11 +1875,17 @@ function renderModuleIndex(modules = []) {
       <a
         class="module-index-item module-index-item-${escapeHtml(module.state)} ${module.blocker ? "is-alert" : ""}"
         href="#${getModuleSectionId(module.key)}"
+        data-module-blocker="${escapeHtml(module.blocker || "")}"
+        data-module-enabled="${module.enabled ? "true" : "false"}"
         data-jump-module="${getModuleSectionId(module.key)}"
+        data-module-nav-label="${escapeHtml(module.label)}"
         data-module-nav="${escapeHtml(module.key)}"
+        data-module-state="${escapeHtml(module.state)}"
+        aria-label="${escapeHtml(`${module.label}: ${getModuleDisplayStateLabel(module.state)}. ${getModuleNavigationSummary(module)}`)}"
+        title="${escapeHtml(getModuleNavigationSummary(module))}"
       >
         <span class="module-index-top">
-          <span class="module-index-name">${escapeHtml(module.label)}</span>
+          <span class="module-index-name" data-module-nav-name="${escapeHtml(module.key)}">${escapeHtml(module.label)}</span>
           <span
             class="status-pill status-pill-${escapeHtml(module.state)}"
             data-module-nav-pill="${escapeHtml(module.key)}"
@@ -1607,11 +1893,8 @@ function renderModuleIndex(modules = []) {
             ${escapeHtml(getModuleDisplayStateLabel(module.state))}
           </span>
         </span>
-        <span class="module-index-summary" data-module-nav-summary="${escapeHtml(module.key)}">
-          ${escapeHtml(getModuleNavigationSummary(module))}
-        </span>
         <span class="module-index-meta" data-module-nav-meta="${escapeHtml(module.key)}">
-          ${escapeHtml(module.enabled ? "Enabled module" : "Disabled module")}
+          ${escapeHtml(getModuleNavigationMeta(module))}
         </span>
       </a>
     `)
@@ -1660,6 +1943,26 @@ function getModuleNavigationSummary(module) {
   }
 
   return "Configured and ready for this server.";
+}
+
+function getModuleNavigationMeta(module) {
+  if (!module.enabled) {
+    return "Currently off";
+  }
+
+  if (module.blocker) {
+    return "Finish setup";
+  }
+
+  if (module.state === "today") {
+    return "Active today";
+  }
+
+  if (module.state === "ended") {
+    return "Past target";
+  }
+
+  return "Ready to edit";
 }
 
 function toKebabCase(value) {

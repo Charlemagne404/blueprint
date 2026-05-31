@@ -366,40 +366,6 @@
     syncVisibleCards();
   }
 
-  function bindClickableCards() {
-    document.querySelectorAll("[data-card-link]").forEach((card) => {
-      const href = safeText(card.getAttribute("data-card-link"));
-      if (!href) {
-        return;
-      }
-
-      function followCardLink() {
-        window.location.href = href;
-      }
-
-      card.addEventListener("click", (event) => {
-        if (event.target.closest("a, button, input, select, textarea, label")) {
-          return;
-        }
-
-        followCardLink();
-      });
-
-      card.addEventListener("keydown", (event) => {
-        if (event.key !== "Enter" && event.key !== " ") {
-          return;
-        }
-
-        if (event.target.closest("a, button, input, select, textarea")) {
-          return;
-        }
-
-        event.preventDefault();
-        followCardLink();
-      });
-    });
-  }
-
   function bindModuleCards() {
     const cards = Array.from(document.querySelectorAll("[data-module-card]"));
     if (cards.length === 0) {
@@ -470,7 +436,12 @@
     const discardButton = form.querySelector("[data-discard-button]");
     const saveTitle = form.querySelector("[data-save-title]");
     const saveStatus = form.querySelector("[data-save-status]");
+    const setupRail = document.querySelector("[data-setup-rail]");
+    const setupIssueCount = document.querySelector("[data-setup-issue-count]");
+    const nextIssueLabel = document.querySelector("[data-next-issue-label]");
+    const nextIssueCopy = document.querySelector("[data-next-issue-copy]");
     const validationSummary = document.querySelector("[data-validation-summary]");
+    const validationLead = document.querySelector("[data-validation-lead]");
     const validationList = document.querySelector("[data-validation-list]");
     const overviewEnabled = document.querySelector("[data-overview-enabled]");
     const overviewAttention = document.querySelector("[data-overview-attention]");
@@ -496,18 +467,6 @@
     const excludedDateEmpty = form.querySelector("[data-excluded-date-empty]");
     const reviewIssueButtons = Array.from(document.querySelectorAll("[data-review-issues]"));
     const expandIssueButtons = Array.from(document.querySelectorAll("[data-expand-issues]"));
-
-    const moduleLabels = {
-      announcements: "Announcements",
-      auditLog: "Audit log",
-      autoModeration: "Automod",
-      autoRole: "Auto role",
-      countdown: "Countdown",
-      joinScreening: "Join screening",
-      starboard: "Highlights",
-      suggestions: "Suggestions",
-      welcome: "Welcome",
-    };
     const statusLabels = {
       announcements: {
         disabled: "Disabled",
@@ -560,6 +519,18 @@
     let initialSnapshot = serializeForm(form);
     let initialFieldState = getFieldStateSnapshot();
     let isDirty = false;
+
+    function getStatusLabel(key, state) {
+      const fallbackLabels = {
+        disabled: "Disabled",
+        ended: "Ended",
+        incomplete: "Needs setup",
+        live: "Live",
+        today: "Today",
+      };
+
+      return (statusLabels[key] && statusLabels[key][state]) || fallbackLabels[state] || "Disabled";
+    }
 
     function getField(name) {
       return form.elements.namedItem(name);
@@ -670,6 +641,53 @@
       return safeText(field.selectedOptions[0].textContent) || fallback;
     }
 
+    function getModuleLabel(key) {
+      const navCard = document.querySelector(`[data-module-nav="${key}"]`);
+      return safeText(navCard && navCard.getAttribute("data-module-nav-label")) || key;
+    }
+
+    function getStaticModuleState() {
+      return Object.fromEntries(
+        Array.from(document.querySelectorAll("[data-module-nav]"))
+          .map((navCard) => {
+            const key = safeText(navCard.getAttribute("data-module-nav"));
+            if (!key) {
+              return null;
+            }
+
+            return [
+              key,
+              {
+                blocker: safeText(navCard.getAttribute("data-module-blocker")),
+                enabled: safeText(navCard.getAttribute("data-module-enabled")) === "true",
+                state: safeText(navCard.getAttribute("data-module-state")) || "disabled",
+              },
+            ];
+          })
+          .filter(Boolean),
+      );
+    }
+
+    function getModuleNavigationMeta(module) {
+      if (!module.enabled) {
+        return "Currently off";
+      }
+
+      if (module.blocker) {
+        return "Finish setup";
+      }
+
+      if (module.state === "today") {
+        return "Active today";
+      }
+
+      if (module.state === "ended") {
+        return "Past target";
+      }
+
+      return "Ready to edit";
+    }
+
     function getExcludedDates() {
       return normalizeExcludedDatesValue(excludedDatesHidden ? excludedDatesHidden.value : "");
     }
@@ -764,6 +782,7 @@
       const starboardChannelId = getValue("starboardChannelId");
       const suggestionsChannelId = getValue("suggestionsChannelId");
       const modules = {
+        ...getStaticModuleState(),
         announcements: {
           blocker: "",
           enabled: announcementsEnabled,
@@ -777,6 +796,11 @@
         autoModeration: {
           blocker: "",
           enabled: autoModerationEnabled,
+          state: "disabled",
+        },
+        autoRole: {
+          blocker: "",
+          enabled: autoRoleEnabled,
           state: "disabled",
         },
         countdown: {
@@ -802,11 +826,6 @@
         welcome: {
           blocker: "",
           enabled: welcomeEnabled,
-          state: "disabled",
-        },
-        autoRole: {
-          blocker: "",
-          enabled: autoRoleEnabled,
           state: "disabled",
         },
       };
@@ -919,7 +938,7 @@
       }
 
       target.className = `status-pill status-pill-${state}`;
-      target.textContent = statusLabels[key][state];
+      target.textContent = getStatusLabel(key, state);
     }
 
     function getModuleNavigationSummary(module) {
@@ -946,28 +965,65 @@
       const navCard = document.querySelector(`[data-module-nav="${key}"]`);
       if (navCard) {
         navCard.className = `module-index-item module-index-item-${module.state} ${module.blocker ? "is-alert" : ""}`;
+        navCard.setAttribute("data-module-blocker", module.blocker || "");
+        navCard.setAttribute("data-module-enabled", module.enabled ? "true" : "false");
+        navCard.setAttribute("data-module-state", module.state);
+        navCard.title = getModuleNavigationSummary(module);
+        navCard.setAttribute(
+          "aria-label",
+          `${getModuleLabel(key)}: ${getStatusLabel(key, module.state)}. ${getModuleNavigationSummary(module)}`,
+        );
       }
 
       const navPill = document.querySelector(`[data-module-nav-pill="${key}"]`);
       if (navPill) {
         navPill.className = `status-pill status-pill-${module.state}`;
-        navPill.textContent = statusLabels[key][module.state];
-      }
-
-      const navSummary = document.querySelector(`[data-module-nav-summary="${key}"]`);
-      if (navSummary) {
-        navSummary.textContent = getModuleNavigationSummary(module);
+        navPill.textContent = getStatusLabel(key, module.state);
       }
 
       const navMeta = document.querySelector(`[data-module-nav-meta="${key}"]`);
       if (navMeta) {
-        navMeta.textContent = module.enabled ? "Enabled module" : "Disabled module";
+        navMeta.textContent = getModuleNavigationMeta(module);
       }
     }
 
     function getFirstBlockedModuleKey(moduleState) {
       return Object.entries(moduleState.modules)
         .find(([, module]) => module.blocker)?.[0] || "";
+    }
+
+    function syncSetupRail(moduleState) {
+      const firstBlockedKey = getFirstBlockedModuleKey(moduleState);
+      const firstBlockedModule = firstBlockedKey ? moduleState.modules[firstBlockedKey] : null;
+
+      if (setupRail) {
+        setupRail.classList.toggle("has-issues", moduleState.attentionModules > 0);
+        setupRail.classList.toggle("is-clear", moduleState.attentionModules === 0);
+      }
+
+      if (setupIssueCount) {
+        setupIssueCount.textContent = moduleState.attentionModules > 0
+          ? `${moduleState.attentionModules} issue${moduleState.attentionModules === 1 ? "" : "s"}`
+          : "All configured";
+      }
+
+      if (nextIssueLabel) {
+        nextIssueLabel.textContent = firstBlockedModule
+          ? `Resolve ${getModuleLabel(firstBlockedKey)} next`
+          : "All enabled modules are configured";
+      }
+
+      if (nextIssueCopy) {
+        nextIssueCopy.textContent = firstBlockedModule
+          ? firstBlockedModule.blocker
+          : "Use the module shortcuts below to review settings, make edits, and save when you are ready.";
+      }
+
+      if (validationLead) {
+        validationLead.textContent = firstBlockedModule
+          ? `Start with ${getModuleLabel(firstBlockedKey)}: ${firstBlockedModule.blocker}`
+          : "Every enabled module is configured.";
+      }
     }
 
     function syncValidationSummary(moduleState) {
@@ -984,7 +1040,7 @@
               href="#${escapeHtml(getModuleSectionId(key))}"
               data-jump-module="${escapeHtml(getModuleSectionId(key))}"
             >
-              ${escapeHtml(moduleLabels[key] || key)}
+              ${escapeHtml(getModuleLabel(key))}
             </a>
             <span>${escapeHtml(module.blocker)}</span>
           </li>
@@ -1016,6 +1072,7 @@
         overviewHello.textContent = moduleState.helloEnabled ? "Live" : "Disabled";
       }
 
+      syncSetupRail(moduleState);
       syncValidationSummary(moduleState);
       reviewIssueButtons.forEach((button) => {
         button.classList.toggle("is-hidden", moduleState.attentionModules === 0);
@@ -1860,7 +1917,6 @@
 
   bindLoginButtons();
   bindLinkDiscordButton();
-  bindClickableCards();
   bindModuleCards();
   bindModuleJumpLinks();
   bindCountdownControls();

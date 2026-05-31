@@ -161,6 +161,11 @@ const {
   setCountdownAlertLastSentOn,
   upsertStarboardEntry,
 } = require("./storage");
+const {
+  DEFAULT_ANTI_RAID_SLOWMODE_SECONDS,
+  createCooldownStore,
+  getLockdownSlowmodeSeconds,
+} = require("./runtime-utils");
 
 const runtimeConfigValidation = config.validateRuntimeConfig();
 for (const warning of runtimeConfigValidation.warnings) {
@@ -175,12 +180,14 @@ if (runtimeConfigValidation.errors.length > 0) {
 }
 
 const SESSION_COOKIE_MAX_AGE_MS = 1000 * 60 * 60 * 24 * 7;
+const COMMAND_REGISTRATION_RETRY_MS = 1000 * 60 * 5;
 const APPLICATION_MODAL_CUSTOM_ID = "applications-submit";
 const APPLICATION_ANSWER_INPUT_PREFIX = "applications-answer-";
 const sessionStore = createSessionStore({
   dataDir: config.dataDir,
   ttlMs: SESSION_COOKIE_MAX_AGE_MS,
 });
+const automationCooldowns = createCooldownStore();
 
 const commands = [
   new SlashCommandBuilder()
@@ -314,13 +321,23 @@ app.use((request, response, next) => {
   next();
 });
 
-app.get("/", (request, response) => {
-  response.send(
-    renderHome({
-      authConfig: getAuthClientConfig(request),
-      sessionUser: response.locals.sessionUser,
-    }),
-  );
+app.get("/", async (request, response, next) => {
+  try {
+    const guilds = request.session.user?.discordUserId
+      ? await getManageableGuilds(request.session.user.discordUserId)
+      : [];
+
+    response.send(
+      renderHome({
+        addBotUrl,
+        authConfig: getAuthClientConfig(request),
+        guilds,
+        sessionUser: response.locals.sessionUser,
+      }),
+    );
+  } catch (error) {
+    next(error);
+  }
 });
 
 app.get("/privacy", (request, response) => {
@@ -653,6 +670,10 @@ app.post("/dashboard/:guildId", requireAuthPage, requireCsrfToken, async (reques
       request.session.user.id,
     );
 
+    if (!settings.antiRaidEnabled) {
+      await releaseAntiRaidLockdown(guild.id, { force: true }).catch(() => null);
+    }
+
     await syncTicketPanel(guild, settings).catch((error) => {
       console.error(`Failed to sync ticket panel for guild ${guild.id}.`);
       console.error(error);
@@ -741,8 +762,40 @@ async function registerCommands() {
   console.log(`Registered ${body.length} global slash commands.`);
 }
 
+let commandRegistrationInFlight = false;
+let commandRegistrationRetryTimer = null;
+
+async function registerCommandsWithRetry() {
+  if (commandRegistrationInFlight) {
+    return;
+  }
+
+  commandRegistrationInFlight = true;
+
+  try {
+    await registerCommands();
+    if (commandRegistrationRetryTimer) {
+      clearTimeout(commandRegistrationRetryTimer);
+      commandRegistrationRetryTimer = null;
+    }
+  } catch (error) {
+    console.error("Failed to register slash commands.");
+    console.error(error);
+
+    if (!commandRegistrationRetryTimer) {
+      commandRegistrationRetryTimer = setTimeout(() => {
+        commandRegistrationRetryTimer = null;
+        void registerCommandsWithRetry();
+      }, COMMAND_REGISTRATION_RETRY_MS);
+    }
+  } finally {
+    commandRegistrationInFlight = false;
+  }
+}
+
 client.once(Events.ClientReady, (readyClient) => {
   console.log(`Logged in as ${readyClient.user.tag}`);
+  void registerCommandsWithRetry();
   startCountdownAlertScheduler();
   syncTicketPanelsForClient().catch((error) => {
     console.error("Failed to sync ticket panels.");
@@ -751,63 +804,70 @@ client.once(Events.ClientReady, (readyClient) => {
 });
 
 client.on(Events.InteractionCreate, async (interaction) => {
-  if (interaction.isButton()) {
-    await handleButtonInteraction(interaction);
-    return;
-  }
+  try {
+    if (interaction.isButton()) {
+      await handleButtonInteraction(interaction);
+      return;
+    }
 
-  if (interaction.isModalSubmit()) {
-    await handleModalSubmit(interaction);
-    return;
-  }
+    if (interaction.isModalSubmit()) {
+      await handleModalSubmit(interaction);
+      return;
+    }
 
-  if (!interaction.isChatInputCommand()) {
-    return;
-  }
+    if (!interaction.isChatInputCommand()) {
+      return;
+    }
 
-  await handleCommand(interaction);
+    await handleCommand(interaction);
+  } catch (error) {
+    console.error("Interaction handling failed.");
+    console.error(error);
+    await replyWithRuntimeError(interaction);
+  }
 });
 
 client.on(Events.GuildMemberAdd, async (member) => {
   const settings = getGuildSettings(member.guild.id);
-
-  try {
-    await evaluateAntiRaid(member.guild, settings);
-    const screening = await screenNewMember(member, settings);
-    await logMemberJoin(member, settings);
-    if (screening.preventedOnboarding) {
-      return;
-    }
-
-    await assignAutoRole(member, settings);
-    await sendWelcomeMessage(member, settings);
-    await runMemberJoinAutomation(member, settings);
-  } catch (error) {
-    console.error(`Failed onboarding flow for guild ${member.guild.id}.`);
-    console.error(error);
+  await runIsolatedGuildTask(member.guild.id, "anti-raid evaluation", () =>
+    evaluateAntiRaid(member.guild, settings),
+  );
+  const screening = await runIsolatedGuildTask(
+    member.guild.id,
+    "join screening",
+    () => screenNewMember(member, settings),
+    { preventedOnboarding: false },
+  );
+  await runIsolatedGuildTask(member.guild.id, "member join audit log", () =>
+    logMemberJoin(member, settings),
+  );
+  if (screening?.preventedOnboarding) {
+    return;
   }
+
+  await runIsolatedGuildTask(member.guild.id, "auto role assignment", () =>
+    assignAutoRole(member, settings),
+  );
+  await runIsolatedGuildTask(member.guild.id, "welcome message", () =>
+    sendWelcomeMessage(member, settings),
+  );
+  await runIsolatedGuildTask(member.guild.id, "member join automation", () =>
+    runMemberJoinAutomation(member, settings),
+  );
 });
 
 client.on(Events.GuildMemberRemove, async (member) => {
   const settings = getGuildSettings(member.guild.id);
-
-  try {
-    await logMemberLeave(member, settings);
-  } catch (error) {
-    console.error(`Failed leave audit flow for guild ${member.guild.id}.`);
-    console.error(error);
-  }
+  await runIsolatedGuildTask(member.guild.id, "member leave audit log", () =>
+    logMemberLeave(member, settings),
+  );
 });
 
 client.on(Events.GuildMemberUpdate, async (oldMember, newMember) => {
   const settings = getGuildSettings(newMember.guild.id);
-
-  try {
-    await logRoleChange(oldMember, newMember, settings);
-  } catch (error) {
-    console.error(`Failed member update audit flow for guild ${newMember.guild.id}.`);
-    console.error(error);
-  }
+  await runIsolatedGuildTask(newMember.guild.id, "member role audit log", () =>
+    logRoleChange(oldMember, newMember, settings),
+  );
 });
 
 client.on(Events.MessageDelete, async (message) => {
@@ -816,62 +876,93 @@ client.on(Events.MessageDelete, async (message) => {
   }
 
   const settings = getGuildSettings(message.guild.id);
-
-  try {
-    await logMessageDelete(message, settings);
-  } catch (error) {
-    console.error(`Failed message delete audit flow for guild ${message.guild.id}.`);
-    console.error(error);
-  }
-
-  try {
-    await removeStarboardEntryForSourceMessage(message);
-  } catch (error) {
-    console.error(`Failed starboard cleanup for guild ${message.guild.id}.`);
-    console.error(error);
-  }
+  await runIsolatedGuildTask(message.guild.id, "message delete audit log", () =>
+    logMessageDelete(message, settings),
+  );
+  await runIsolatedGuildTask(message.guild.id, "starboard cleanup", () =>
+    removeStarboardEntryForSourceMessage(message),
+  );
 });
 
 client.on(Events.MessageCreate, async (message) => {
   if (!message.guild) {
-    await handleModmailInbound(message);
+    await runIsolatedTask("modmail inbound routing", () => handleModmailInbound(message));
     return;
   }
 
   const settings = getGuildSettings(message.guild.id);
-
-  try {
-    await moderateMessage(message, settings);
-    await runKeywordAutomation(message, settings);
-    await processLevelingMessage(message, settings);
-    await handleAiToolsMessage(message, settings);
-  } catch (error) {
-    console.error(`Failed message automation flow for guild ${message.guild.id}.`);
-    console.error(error);
+  const moderationResult = await runIsolatedGuildTask(
+    message.guild.id,
+    "auto moderation",
+    () => moderateMessage(message, settings),
+    { moderated: false, reasons: [] },
+  );
+  if (moderationResult?.moderated) {
+    return;
   }
+
+  await runIsolatedGuildTask(message.guild.id, "keyword automation", () =>
+    runKeywordAutomation(message, settings),
+  );
+  await runIsolatedGuildTask(message.guild.id, "leveling runtime", () =>
+    processLevelingMessage(message, settings),
+  );
+  await runIsolatedGuildTask(message.guild.id, "AI tools runtime", () =>
+    handleAiToolsMessage(message, settings),
+  );
 });
 
 client.on(Events.MessageReactionAdd, async (reaction, user) => {
-  try {
-    await syncStarboardReaction(reaction, user);
-    await syncReactionRole(reaction, user, false);
-  } catch (error) {
-    const guildId = reaction.message?.guildId || reaction.message?.guild?.id || "unknown";
-    console.error(`Failed starboard add flow for guild ${guildId}.`);
-    console.error(error);
-  }
+  const guildId = reaction.message?.guildId || reaction.message?.guild?.id || "unknown";
+  await runIsolatedGuildTask(guildId, "starboard reaction add", () =>
+    syncStarboardReaction(reaction, user),
+  );
+  await runIsolatedGuildTask(guildId, "reaction role add", () =>
+    syncReactionRole(reaction, user, false),
+  );
 });
 
 client.on(Events.MessageReactionRemove, async (reaction, user) => {
-  try {
-    await syncStarboardReaction(reaction, user);
-    await syncReactionRole(reaction, user, true);
-  } catch (error) {
-    const guildId = reaction.message?.guildId || reaction.message?.guild?.id || "unknown";
-    console.error(`Failed starboard remove flow for guild ${guildId}.`);
-    console.error(error);
-  }
+  const guildId = reaction.message?.guildId || reaction.message?.guild?.id || "unknown";
+  await runIsolatedGuildTask(guildId, "starboard reaction remove", () =>
+    syncStarboardReaction(reaction, user),
+  );
+  await runIsolatedGuildTask(guildId, "reaction role remove", () =>
+    syncReactionRole(reaction, user, true),
+  );
 });
+
+async function runIsolatedTask(label, task, fallbackValue = undefined) {
+  try {
+    return await task();
+  } catch (error) {
+    console.error(`Failed ${label}.`);
+    console.error(error);
+    return fallbackValue;
+  }
+}
+
+async function runIsolatedGuildTask(guildId, label, task, fallbackValue = undefined) {
+  return runIsolatedTask(`${label} for guild ${guildId}`, task, fallbackValue);
+}
+
+async function replyWithRuntimeError(interaction) {
+  if (!interaction || typeof interaction.reply !== "function") {
+    return;
+  }
+
+  const payload = {
+    content: "Something went wrong while handling that action. Try again in a moment.",
+    ephemeral: true,
+  };
+
+  if (interaction.deferred || interaction.replied) {
+    await interaction.followUp(payload).catch(() => null);
+    return;
+  }
+
+  await interaction.reply(payload).catch(() => null);
+}
 
 /**
  * @param {ChatInputCommandInteraction} interaction
@@ -1539,16 +1630,29 @@ async function evaluateAntiRaid(guild, settings) {
 
   const now = Date.now();
   const windowMs = settings.antiRaidWindowSeconds * 1000;
-  const state = raidTracker.get(guild.id) || { joinTimestamps: [], lockedUntil: 0 };
+  const state =
+    raidTracker.get(guild.id) || {
+      joinTimestamps: [],
+      lockedUntil: 0,
+      previousSlowmodes: new Map(),
+      unlockTimer: null,
+    };
   state.joinTimestamps = [...state.joinTimestamps, now].filter((stamp) => now - stamp <= windowMs);
   raidTracker.set(guild.id, state);
 
-  if (now < state.lockedUntil || state.joinTimestamps.length < settings.antiRaidJoinThreshold) {
+  if (state.joinTimestamps.length < settings.antiRaidJoinThreshold) {
     return;
   }
 
-  state.lockedUntil = now + settings.antiRaidLockdownMinutes * 60 * 1000;
+  const lockdownEndsAt = now + settings.antiRaidLockdownMinutes * 60 * 1000;
+  const lockdownAlreadyActive = now < state.lockedUntil;
+  state.lockedUntil = lockdownEndsAt;
   raidTracker.set(guild.id, state);
+  scheduleAntiRaidUnlock(guild.id, state);
+
+  if (lockdownAlreadyActive) {
+    return;
+  }
 
   const alertChannel = guild.channels.cache.get(settings.antiRaidAlertChannelId);
   if (alertChannel && alertChannel.isTextBased()) {
@@ -1565,27 +1669,85 @@ async function evaluateAntiRaid(guild, settings) {
     if (!channel.manageable) {
       continue;
     }
-    await channel.setRateLimitPerUser(10, "Blueprint anti-raid lockdown").catch(() => null);
+
+    if (!state.previousSlowmodes.has(channel.id)) {
+      state.previousSlowmodes.set(channel.id, Math.max(0, channel.rateLimitPerUser || 0));
+    }
+
+    const nextSlowmode = getLockdownSlowmodeSeconds(
+      channel.rateLimitPerUser,
+      DEFAULT_ANTI_RAID_SLOWMODE_SECONDS,
+    );
+    if (nextSlowmode === channel.rateLimitPerUser) {
+      continue;
+    }
+
+    await channel.setRateLimitPerUser(nextSlowmode, "Blueprint anti-raid lockdown").catch(() => null);
+  }
+}
+
+function scheduleAntiRaidUnlock(guildId, state) {
+  if (state.unlockTimer) {
+    clearTimeout(state.unlockTimer);
   }
 
-  setTimeout(async () => {
-    const freshGuild = client.guilds.cache.get(guild.id);
-    if (!freshGuild) {
-      return;
+  state.unlockTimer = setTimeout(() => {
+    void releaseAntiRaidLockdown(guildId);
+  }, Math.max(0, state.lockedUntil - Date.now()));
+}
+
+async function releaseAntiRaidLockdown(guildId, { force = false } = {}) {
+  const state = raidTracker.get(guildId);
+  if (!state) {
+    return;
+  }
+
+  state.unlockTimer = null;
+  if (!force && state.lockedUntil > Date.now()) {
+    scheduleAntiRaidUnlock(guildId, state);
+    return;
+  }
+
+  const guild = client.guilds.cache.get(guildId);
+  if (!guild) {
+    state.previousSlowmodes.clear();
+    state.lockedUntil = 0;
+    return;
+  }
+
+  await guild.channels.fetch().catch(() => null);
+  for (const [channelId, previousSlowmode] of state.previousSlowmodes.entries()) {
+    const channel = guild.channels.cache.get(channelId);
+    if (
+      !channel ||
+      !channel.isTextBased() ||
+      typeof channel.rateLimitPerUser !== "number" ||
+      !channel.manageable
+    ) {
+      continue;
     }
-    await freshGuild.channels.fetch().catch(() => null);
-    for (const channel of freshGuild.channels.cache.values()) {
-      if (
-        !channel ||
-        !channel.isTextBased() ||
-        typeof channel.rateLimitPerUser !== "number" ||
-        !channel.manageable
-      ) {
-        continue;
-      }
-      await channel.setRateLimitPerUser(0, "Blueprint anti-raid lockdown ended").catch(() => null);
+
+    if (channel.rateLimitPerUser === previousSlowmode) {
+      continue;
     }
-  }, settings.antiRaidLockdownMinutes * 60 * 1000);
+
+    await channel.setRateLimitPerUser(
+      previousSlowmode,
+      "Blueprint anti-raid lockdown ended",
+    ).catch(() => null);
+  }
+
+  state.previousSlowmodes.clear();
+  state.lockedUntil = 0;
+}
+
+function stopAntiRaidTracking() {
+  for (const state of raidTracker.values()) {
+    if (state.unlockTimer) {
+      clearTimeout(state.unlockTimer);
+      state.unlockTimer = null;
+    }
+  }
 }
 
 async function syncTicketPanelsForClient() {
@@ -1698,6 +1860,16 @@ async function runSuggestionAutomation(guild, settings, context = {}) {
 async function executeAutomationAction(guild, settings, payload) {
   const logChannel = guild.channels.cache.get(settings.automationsLogChannelId);
   if (!logChannel || !logChannel.isTextBased()) {
+    return;
+  }
+
+  const cooldownKey = [
+    guild.id,
+    settings.automationsTrigger,
+    settings.automationsAction,
+    settings.automationsLogChannelId,
+  ].join(":");
+  if (!automationCooldowns.consume(cooldownKey, settings.automationsCooldownSeconds)) {
     return;
   }
 
@@ -2157,13 +2329,27 @@ async function getGuildDashboardOptions(guild) {
 }
 
 let countdownAlertSweepInFlight = false;
+let countdownAlertInterval = null;
 
 function startCountdownAlertScheduler() {
+  if (countdownAlertInterval) {
+    return;
+  }
+
   void runCountdownAlertSweep();
 
-  setInterval(() => {
+  countdownAlertInterval = setInterval(() => {
     void runCountdownAlertSweep();
   }, 30_000);
+}
+
+function stopCountdownAlertScheduler() {
+  if (!countdownAlertInterval) {
+    return;
+  }
+
+  clearInterval(countdownAlertInterval);
+  countdownAlertInterval = null;
 }
 
 async function runCountdownAlertSweep() {
@@ -2366,7 +2552,6 @@ function safeOriginFromUrl(value) {
 }
 
 async function start() {
-  await registerCommands();
   await client.login(config.token);
 
   const server = app.listen(config.port, () => {
@@ -2392,6 +2577,14 @@ function registerShutdownHandlers(server) {
 
     shuttingDown = true;
     console.log(`Received ${signal}; shutting down.`);
+
+    stopCountdownAlertScheduler();
+    stopAntiRaidTracking();
+    automationCooldowns.clear();
+    if (commandRegistrationRetryTimer) {
+      clearTimeout(commandRegistrationRetryTimer);
+      commandRegistrationRetryTimer = null;
+    }
 
     await new Promise((resolve) => {
       server.close(resolve);

@@ -238,18 +238,19 @@ async function moderateMessage(message, settings) {
     message.author.bot ||
     shouldSkipMember(message.member)
   ) {
-    return;
+    return { moderated: false, reasons: [] };
   }
 
   const reasons = collectModerationReasons(message, settings);
   if (reasons.length === 0) {
-    return;
+    return { moderated: false, reasons: [] };
   }
 
   if (message.deletable) {
     await message.delete().catch(() => null);
   }
 
+  let timedOut = false;
   if (settings.autoModerationTimeoutMinutes > 0 && message.member.moderatable) {
     await message.member
       .timeout(
@@ -257,6 +258,7 @@ async function moderateMessage(message, settings) {
         `Blueprint automod: ${reasons.join(", ")}`,
       )
       .catch(() => null);
+    timedOut = true;
   }
 
   const logChannel = message.guild.channels.cache.get(settings.autoModerationLogChannelId);
@@ -272,6 +274,12 @@ async function moderateMessage(message, settings) {
       ].join("\n"),
     });
   }
+
+  return {
+    moderated: true,
+    reasons,
+    timedOut,
+  };
 }
 
 module.exports = {
