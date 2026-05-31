@@ -1,8 +1,14 @@
 (function () {
   const config = window.BLUEPRINT_AUTH || {};
   const trustedLoginOrigins = new Set(config.trustedLoginOrigins || []);
+  const popupContract = config.popupContract || {};
+  const popupMessageSource = safeText(popupContract.messageSource) || "continental-id";
+  const popupMessageType = safeText(popupContract.messageType) || "auth-result";
+  const popupName = safeText(popupContract.popupName) || "continental-id-login";
   const currentPath = `${window.location.pathname}${window.location.search}`;
   const DEFAULT_WEEKDAYS = [1, 2, 3, 4, 5];
+  let loginPopupMonitorId = 0;
+  let loginPopupWindow = null;
   const dateLabelFormatter = new Intl.DateTimeFormat("en-US", {
     month: "long",
     day: "numeric",
@@ -17,6 +23,171 @@
 
   function isTrustedLoginOrigin(origin) {
     return trustedLoginOrigins.has(origin);
+  }
+
+  function ensureAuthFeedbackNode() {
+    let notice = document.querySelector("[data-auth-feedback]");
+    if (notice) {
+      return notice;
+    }
+
+    const main = document.querySelector("main") || document.body;
+    notice = document.createElement("div");
+    notice.className = "notice notice-error";
+    notice.hidden = true;
+    notice.tabIndex = -1;
+    notice.setAttribute("data-auth-feedback", "true");
+    notice.setAttribute("role", "alert");
+    main.prepend(notice);
+    return notice;
+  }
+
+  function showAuthFeedback(message, tone) {
+    const notice = ensureAuthFeedbackNode();
+    notice.className = `notice notice-${tone || "error"}`;
+    notice.textContent = message;
+    notice.hidden = false;
+    if (typeof notice.focus === "function") {
+      notice.focus({ preventScroll: false });
+    }
+  }
+
+  function clearAuthFeedback() {
+    const notice = document.querySelector("[data-auth-feedback]");
+    if (!notice) {
+      return;
+    }
+
+    notice.hidden = true;
+    notice.textContent = "";
+  }
+
+  function stopLoginPopupMonitor() {
+    if (loginPopupMonitorId) {
+      window.clearInterval(loginPopupMonitorId);
+      loginPopupMonitorId = 0;
+    }
+  }
+
+  function startLoginPopupMonitor(popup) {
+    stopLoginPopupMonitor();
+    loginPopupWindow = popup;
+    loginPopupMonitorId = window.setInterval(() => {
+      if (!loginPopupWindow || !loginPopupWindow.closed) {
+        return;
+      }
+
+      stopLoginPopupMonitor();
+      showAuthFeedback("Sign-in popup closed before Continental ID completed.", "error");
+      console.warn("[auth]", { code: "auth/popup-closed" });
+    }, 400);
+  }
+
+  function parseAuthPopupMessage(data) {
+    if (!data || typeof data !== "object") {
+      return null;
+    }
+
+    const source = safeText(data.source);
+    const type = safeText(data.type);
+    const event = safeText(data.event);
+
+    if (source === popupMessageSource && type === popupMessageType) {
+      if (event === "login_success") {
+        return {
+          accessToken: safeText(data.accessToken || data.token),
+          code: safeText(data.code) || null,
+          correlationId: safeText(data.correlationId) || null,
+          event: "login-success",
+          message: safeText(data.message) || null,
+        };
+      }
+
+      if (event === "login_error") {
+        return {
+          accessToken: "",
+          code: safeText(data.code) || null,
+          correlationId: safeText(data.correlationId) || null,
+          event: "login-error",
+          message: safeText(data.message || data.error) || null,
+        };
+      }
+
+      if (event === "oauth_linked") {
+        return {
+          accessToken: "",
+          code: safeText(data.code) || null,
+          correlationId: safeText(data.correlationId) || null,
+          event: "oauth-linked",
+          message: safeText(data.message) || null,
+        };
+      }
+    }
+
+    if (type === "LOGIN_SUCCESS") {
+      return {
+        accessToken: safeText(data.accessToken || data.token),
+        code: null,
+        correlationId: safeText(data.correlationId) || null,
+        event: "login-success",
+        message: null,
+      };
+    }
+
+    if (type === "LOGIN_ERROR") {
+      return {
+        accessToken: "",
+        code: safeText(data.code) || null,
+        correlationId: safeText(data.correlationId) || null,
+        event: "login-error",
+        message: safeText(data.message || data.error) || null,
+      };
+    }
+
+    if (type === "OAUTH_LINKED") {
+      return {
+        accessToken: "",
+        code: null,
+        correlationId: safeText(data.correlationId) || null,
+        event: "oauth-linked",
+        message: null,
+      };
+    }
+
+    return null;
+  }
+
+  function parseAuthResultHash() {
+    const hash = safeText(window.location.hash).replace(/^#/, "");
+    if (!hash) {
+      return null;
+    }
+
+    const params = new URLSearchParams(hash);
+    if (params.get("continentalAuth") !== "1") {
+      return null;
+    }
+
+    const authEvent = safeText(params.get("authEvent"));
+    const accessToken = safeText(params.get("accessToken") || params.get("token"));
+
+    return {
+      accessToken,
+      code: safeText(params.get("authCode")) || null,
+      correlationId: safeText(params.get("correlationId")) || null,
+      event: authEvent === "login_error" ? "login-error" : accessToken ? "login-success" : "login-error",
+      message: safeText(params.get("authMessage")) || null,
+    };
+  }
+
+  function buildAuthError(error, fallbackMessage) {
+    const code = safeText(error && error.code);
+    const correlationId = safeText(error && error.correlationId);
+    const message = safeText(error && error.message) || fallbackMessage;
+    const nextError = new Error(message);
+    nextError.code = code || "";
+    nextError.correlationId = correlationId || "";
+    return nextError;
   }
 
   function getModuleStateStorageKey() {
@@ -144,7 +315,7 @@
 
     if (!response.ok) {
       const payload = await response.json().catch(() => ({}));
-      throw new Error(payload.message || "Could not sync your session.");
+      throw buildAuthError(payload.error, payload.message || "Could not sync your session.");
     }
 
     return response.json();
@@ -158,12 +329,18 @@
 
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) {
-      throw new Error(payload.message || "Could not refresh your Dashboard session.");
+      throw buildAuthError(
+        payload.error,
+        payload.message || "Could not refresh your Dashboard session.",
+      );
     }
 
     const accessToken = safeText(payload.accessToken || payload.token);
     if (!accessToken) {
-      throw new Error(payload.message || "No active Dashboard session was found.");
+      throw buildAuthError(
+        { code: "auth/session-missing" },
+        payload.message || "No active Dashboard session was found.",
+      );
     }
 
     return accessToken;
@@ -179,19 +356,22 @@
   }
 
   function openLogin(returnTo) {
+    clearAuthFeedback();
     const url = buildLoginPopupUrl(returnTo);
     const popup = window.open(
       url,
-      "ContinentalIdLogin",
+      popupName,
       "popup=yes,width=520,height=760,resizable=yes,scrollbars=yes",
     );
 
     if (!popup) {
-      window.location.href = url;
+      showAuthFeedback("Login popup blocked. Allow popups for this site and try again.", "error");
+      console.warn("[auth]", { code: "auth/popup-blocked" });
       return;
     }
 
     popup.focus();
+    startLoginPopupMonitor(popup);
   }
 
   async function startDiscordLink(returnTo, button) {
@@ -233,7 +413,7 @@
 
       popup.focus();
     } catch (error) {
-      window.alert(error.message || "Could not start Discord linking.");
+      showAuthFeedback(error.message || "Could not start Discord linking.", "error");
     } finally {
       if (button) {
         button.disabled = false;
@@ -1874,32 +2054,90 @@
     }
 
     const returnTo = safeText(marker.getAttribute("data-return-to")) || "/dashboard";
+    const authResult = parseAuthResultHash();
+
+    if (authResult) {
+      window.history.replaceState({}, "", `${window.location.pathname}${window.location.search}`);
+
+      try {
+        if (authResult.event === "login-error") {
+          throw buildAuthError(
+            {
+              code: authResult.code,
+              correlationId: authResult.correlationId,
+              message: authResult.message,
+            },
+            "Authentication could not be completed.",
+          );
+        }
+
+        if (!authResult.accessToken) {
+          throw buildAuthError(
+            {
+              code: "auth/access-token-missing",
+              correlationId: authResult.correlationId,
+            },
+            "The sign-in redirect did not include an access token.",
+          );
+        }
+
+        await syncLocalSession(authResult.accessToken);
+        window.location.href = returnTo;
+        return;
+      } catch (error) {
+        marker.textContent =
+          error.message || "No active Continental ID session was found. Use sign-in to continue.";
+        showAuthFeedback(marker.textContent, "error");
+        return;
+      }
+    }
 
     try {
       await syncFromDashboard(returnTo);
     } catch (error) {
       marker.textContent =
         error.message || "No active Continental ID session was found. Use sign-in to continue.";
+      showAuthFeedback(marker.textContent, "error");
     }
   }
 
   window.addEventListener("message", async (event) => {
     if (!isTrustedLoginOrigin(event.origin)) {
+      if (parseAuthPopupMessage(event.data)) {
+        console.warn("[auth]", { code: "auth/message-origin-rejected", origin: event.origin });
+      }
       return;
     }
 
-    const messageType = safeText(event.data && event.data.type);
-    if (!messageType) {
+    const message = parseAuthPopupMessage(event.data);
+    if (!message) {
       return;
     }
 
     try {
-      if (messageType === "LOGIN_SUCCESS") {
-        const accessToken = safeText(
-          (event.data && (event.data.accessToken || event.data.token)) || "",
+      if (message.event === "login-error") {
+        stopLoginPopupMonitor();
+        throw buildAuthError(
+          {
+            code: message.code,
+            correlationId: message.correlationId,
+            message: message.message,
+          },
+          "Authentication could not be completed.",
         );
+      }
+
+      if (message.event === "login-success") {
+        stopLoginPopupMonitor();
+        const accessToken = message.accessToken;
         if (!accessToken) {
-          throw new Error("The login popup did not provide an access token.");
+          throw buildAuthError(
+            {
+              code: "auth/access-token-missing",
+              correlationId: message.correlationId,
+            },
+            "The login popup did not provide an access token.",
+          );
         }
 
         await syncLocalSession(accessToken);
@@ -1907,11 +2145,16 @@
         return;
       }
 
-      if (messageType === "OAUTH_LINKED") {
+      if (message.event === "oauth-linked") {
+        stopLoginPopupMonitor();
         await syncFromDashboard(currentPath);
       }
     } catch (error) {
-      window.alert(error.message || "Authentication could not be completed.");
+      showAuthFeedback(error.message || "Authentication could not be completed.", "error");
+      console.error("[auth]", {
+        code: error.code || "auth/session-sync-failed",
+        correlationId: error.correlationId || "",
+      });
     }
   });
 

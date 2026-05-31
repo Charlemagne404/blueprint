@@ -182,9 +182,6 @@ The app exposes:
 - `/healthz` for a lightweight process health check
 - `/readyz` for bot and storage readiness
 
-If the legacy local auth popup assets are not present at `../Dashboard/login popup`, `/auth-popup`
-falls back to the configured `AUTH_LOGIN_POPUP_URL`.
-
 Privileged dashboard POST routes use same-origin checks and CSRF tokens. Run the app behind
 HTTPS in production so secure cookies and HSTS are active.
 

@@ -1,4 +1,3 @@
-const fs = require("node:fs");
 const crypto = require("node:crypto");
 const path = require("node:path");
 
@@ -22,6 +21,15 @@ const {
 } = require("discord.js");
 
 const config = require("./config");
+const {
+  AUTH_ERROR_CODE,
+  AUTH_POPUP_MESSAGE_SOURCE,
+  AUTH_POPUP_MESSAGE_TYPE,
+  AUTH_POPUP_NAME,
+  buildAuthErrorPayload,
+  buildTrustedLoginOrigins,
+  mapAuthErrorCode,
+} = require("./auth-contract");
 const { createSessionStore } = require("./session-store");
 const {
   renderAuthComplete,
@@ -297,15 +305,6 @@ app.get("/favicon.ico", (request, response) => {
 app.get("/favicon.png", (request, response) => {
   response.sendFile(path.join(process.cwd(), "images", "blueprint-pfp2.png"));
 });
-const localAuthPopupDir = path.resolve(process.cwd(), "..", "Dashboard", "login popup");
-if (fs.existsSync(localAuthPopupDir)) {
-  app.use("/auth-popup", express.static(localAuthPopupDir));
-} else {
-  app.use("/auth-popup", (request, response) => {
-    response.redirect(302, config.authLoginPopupUrl);
-  });
-}
-
 app.use((request, response, next) => {
   response.locals.sessionUser = request.session.user || null;
   applySecurityHeaders(response);
@@ -448,10 +447,20 @@ app.get("/auth/complete", (request, response) => {
 });
 
 app.post("/auth/session", requireCsrfToken, async (request, response, next) => {
+  const correlationId = crypto.randomUUID();
   try {
     const accessToken = normalizeToken(request.body.accessToken);
     if (!accessToken) {
-      response.status(400).json({ message: "Access token required." });
+      response
+        .status(400)
+        .set("X-Auth-Correlation-Id", correlationId)
+        .json(
+          buildAuthErrorPayload({
+            code: AUTH_ERROR_CODE.accessTokenMissing,
+            correlationId,
+            message: "Access token required.",
+          }),
+        );
       return;
     }
 
@@ -461,12 +470,25 @@ app.post("/auth/session", requireCsrfToken, async (request, response, next) => {
     request.session.accessToken = accessToken;
     request.session.user = sessionUser;
 
-    response.json({
+    response
+      .set("X-Auth-Correlation-Id", correlationId)
+      .json({
       authenticated: true,
+      auth: {
+        code: "auth/ok",
+        correlationId,
+        popup: {
+          source: AUTH_POPUP_MESSAGE_SOURCE,
+          type: AUTH_POPUP_MESSAGE_TYPE,
+        },
+        sessionEstablished: true,
+      },
+      correlationId,
       discordLinked: sessionUser.discordLinked,
       user: sessionUser,
     });
   } catch (error) {
+    error.authCorrelationId = correlationId;
     next(error);
   }
 });
@@ -721,6 +743,10 @@ app.use((request, response) => {
 
 app.use((error, request, response, next) => {
   console.error(error);
+  const correlationId = error.authCorrelationId || crypto.randomUUID();
+  const authCode =
+    error.code ||
+    (typeof error.statusCode === "number" ? mapAuthErrorCode(error.statusCode) : null);
 
   if (response.headersSent) {
     next(error);
@@ -729,7 +755,16 @@ app.use((error, request, response, next) => {
 
   if (error.statusCode === 401) {
     if (request.path.startsWith("/auth/")) {
-      response.status(401).json({ message: error.message || "Authentication required." });
+      response
+        .status(401)
+        .set("X-Auth-Correlation-Id", correlationId)
+        .json(
+          buildAuthErrorPayload({
+            code: authCode || AUTH_ERROR_CODE.invalidAccessToken,
+            correlationId,
+            message: error.message || "Authentication required.",
+          }),
+        );
       return;
     }
 
@@ -740,6 +775,22 @@ app.use((error, request, response, next) => {
         )}`,
       );
     });
+    return;
+  }
+
+  if (request.path.startsWith("/auth/")) {
+    const statusCode = error.statusCode || 500;
+    response
+      .status(statusCode)
+      .set("X-Auth-Correlation-Id", correlationId)
+      .json(
+        buildAuthErrorPayload({
+          code: authCode || AUTH_ERROR_CODE.sessionSyncFailed,
+          correlationId,
+          message: error.message || "Authentication failed.",
+          retryable: statusCode >= 500,
+        }),
+      );
     return;
   }
 
@@ -2175,11 +2226,14 @@ function requireAuthJson(request, response, next) {
 
 async function fetchAuthJson(
   endpoint,
-  { accessToken, body, headers: extraHeaders = {}, method = "GET" } = {},
+  { accessToken, body, correlationId = "", headers: extraHeaders = {}, method = "GET" } = {},
 ) {
   const headers = { ...extraHeaders };
   if (accessToken) {
     headers.Authorization = `Bearer ${accessToken}`;
+  }
+  if (correlationId) {
+    headers["X-Auth-Correlation-Id"] = correlationId;
   }
   if (body !== undefined) {
     headers["Content-Type"] = "application/json";
@@ -2195,6 +2249,13 @@ async function fetchAuthJson(
 
   if (!result.ok) {
     const error = new Error(payload.message || `Auth request failed with ${result.status}.`);
+    error.code = payload.error?.code || mapAuthErrorCode(result.status);
+    error.correlationId =
+      payload.error?.correlationId ||
+      payload.correlationId ||
+      result.headers.get("x-auth-correlation-id") ||
+      correlationId ||
+      "";
     error.statusCode = result.status;
     throw error;
   }
@@ -2203,7 +2264,8 @@ async function fetchAuthJson(
 }
 
 async function fetchAuthProfile(accessToken) {
-  const payload = await fetchAuthJson("/api/auth/me", { accessToken });
+  const correlationId = crypto.randomUUID();
+  const payload = await fetchAuthJson("/api/auth/me", { accessToken, correlationId });
   return payload.user || payload;
 }
 
@@ -2226,9 +2288,10 @@ function buildSessionUser(user) {
 }
 
 function getAuthClientConfig(request) {
-  const loginPopupOrigin = safeOriginFromUrl(config.authLoginPopupUrl);
-  const trustedLoginOrigins = Array.from(
-    new Set([loginPopupOrigin, ...config.authTrustedLoginOrigins].filter(Boolean)),
+  const trustedLoginOrigins = buildTrustedLoginOrigins(
+    config.authLoginPopupUrl,
+    config.authTrustedLoginOrigins,
+    safeOriginFromUrl,
   );
 
   return {
@@ -2237,6 +2300,11 @@ function getAuthClientConfig(request) {
     authLoginPopupUrl: config.authLoginPopupUrl,
     baseUrl: config.baseUrl,
     csrfToken: request.session.csrfToken,
+    popupContract: {
+      messageSource: AUTH_POPUP_MESSAGE_SOURCE,
+      messageType: AUTH_POPUP_MESSAGE_TYPE,
+      popupName: AUTH_POPUP_NAME,
+    },
     trustedLoginOrigins,
   };
 }
