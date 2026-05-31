@@ -1,3 +1,4 @@
+const fs = require("node:fs");
 const crypto = require("node:crypto");
 const path = require("node:path");
 
@@ -276,6 +277,7 @@ const invitePermissions = new PermissionsBitField([
 const addBotUrl =
   `https://discord.com/oauth2/authorize?client_id=${config.clientId}` +
   `&scope=bot%20applications.commands&permissions=${invitePermissions}`;
+const authPopupStaticDir = resolveAuthPopupStaticDir();
 
 app.set("trust proxy", 1);
 app.use(express.json());
@@ -297,6 +299,27 @@ app.use(
 );
 app.use(express.static(path.join(process.cwd(), "public")));
 app.use("/images", express.static(path.join(process.cwd(), "images")));
+if (authPopupStaticDir) {
+  app.use("/auth-popup", express.static(authPopupStaticDir));
+  app.get("/auth-popup", (request, response) => {
+    response.redirect(302, "/auth-popup/popup.html");
+  });
+  app.get("/auth-popup/:asset", (request, response, next) => {
+    const asset = path.basename(String(request.params.asset || ""));
+    const assetPath = path.join(authPopupStaticDir, asset);
+
+    if (!asset || !fs.existsSync(assetPath)) {
+      next();
+      return;
+    }
+
+    response.sendFile(assetPath);
+  });
+} else {
+  console.warn(
+    "Auth popup assets were not found in the local Dashboard repo. /auth-popup will remain unavailable.",
+  );
+}
 app.use(ensureCsrfToken);
 app.use(requireTrustedOrigin);
 app.get("/favicon.ico", (request, response) => {
@@ -2617,6 +2640,25 @@ function safeOriginFromUrl(value) {
   } catch {
     return "";
   }
+}
+
+function resolveAuthPopupStaticDir() {
+  const candidates = [
+    path.resolve(process.cwd(), "..", "Dashboard", "frontend", "login"),
+    path.resolve(process.cwd(), "..", "Dashboard", "login popup"),
+  ];
+
+  for (const candidate of candidates) {
+    if (!fs.existsSync(candidate)) {
+      continue;
+    }
+
+    if (fs.existsSync(path.join(candidate, "popup.html"))) {
+      return candidate;
+    }
+  }
+
+  return "";
 }
 
 async function start() {
