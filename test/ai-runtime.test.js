@@ -79,6 +79,33 @@ test("AI access messages block AI-banned accounts", () => {
   assert.equal(message, "⛔ Your Continental ID account is not allowed to use Blueprint AI.");
 });
 
+test("AI access messages prefer centralized access policy when present", () => {
+  const deniedMessage = getAiAccessRequirementMessage(
+    {
+      body: {
+        access: {
+          ai: {
+            allowed: false,
+            reasonCode: "auth/authorization-denied",
+            requirements: [],
+          },
+        },
+        flags: {},
+        linked: true,
+        user: {
+          discordLinked: true,
+        },
+      },
+      configured: true,
+      ok: true,
+    },
+    {},
+    "Blueprint AI",
+  );
+
+  assert.equal(deniedMessage, "⛔ Your Continental ID account is not allowed to use Blueprint AI.");
+});
+
 test("AI prompt helpers preserve persona and strip mentions", () => {
   assert.equal(
     buildAiPrompt("Summarize the rules", "Helpful and concise community copilot"),

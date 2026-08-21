@@ -55,6 +55,12 @@ Examples of managed modules in this repo include:
 - applications
 - AI tools
 
+Runtime notes:
+
+- Modmail forwards member DMs to the configured inbox. Staff reply by replying to the forwarded Discord message; Blueprint sends that reply back to the member.
+- The automation `Create ticket` action requires the Tickets module to be enabled and configured, and creates a real private ticket channel.
+- Reaction roles currently support one configured role per reaction message.
+
 ## Slash Commands
 
 Current slash commands:
@@ -141,6 +147,7 @@ PORT=3000
 DISCORD_GUILD_ID=
 AUTH_TRUSTED_LOGIN_ORIGINS=
 SESSION_COOKIE_NAME=blueprint.sid
+AUTH_REQUEST_TIMEOUT_SECONDS=10
 AI_SERVER_URL=http://localhost:3001/ask
 AI_ASK_URL=
 AI_CHAT_URL=
@@ -176,6 +183,8 @@ VANGUARD_INSTANCE_ID=
 - Runtime database files are ignored by Git and should be backed up by the deployment environment.
 
 ## Production Checks
+
+See [PUBLIC_LAUNCH_READINESS.md](PUBLIC_LAUNCH_READINESS.md) for the full public-launch gate and evidence checklist.
 
 The app exposes:
 

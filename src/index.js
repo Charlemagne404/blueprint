@@ -13,6 +13,7 @@ const {
   GatewayIntentBits,
   ModalBuilder,
   Partials,
+  PermissionFlagsBits,
   PermissionsBitField,
   REST,
   Routes,
@@ -31,6 +32,7 @@ const {
   buildTrustedLoginOrigins,
   mapAuthErrorCode,
 } = require("./auth-contract");
+const continentalIdBrowserGlobalPath = require.resolve("@continental/id-client/browser-global");
 const { createSessionStore } = require("./session-store");
 const {
   renderAuthComplete,
@@ -132,6 +134,7 @@ const {
   CLOSE_TICKET_CUSTOM_ID,
   OPEN_TICKET_CUSTOM_ID,
   closeTicket,
+  createTicketForUser,
   openTicket,
   syncTicketPanel,
 } = require("./modules/tickets-runtime");
@@ -144,6 +147,11 @@ const {
   validateAutomationSettings,
 } = require("./modules/automations");
 const { normalizeModmailSettings, validateModmailSettings } = require("./modules/modmail");
+const {
+  canStaffReplyToModmail,
+  getModmailReferenceId,
+  getModmailReplyContent,
+} = require("./modules/modmail-runtime");
 const {
   getApplicationPrompts,
   normalizeApplicationSettings,
@@ -165,8 +173,10 @@ const {
   getCountdownAlertLastSentOn,
   getNextSuggestionNumber,
   getGuildSettings,
+  getModmailMessageMapping,
   getStarboardEntry,
   saveGuildSettings,
+  saveModmailMessageMapping,
   setCountdownAlertLastSentOn,
   upsertStarboardEntry,
 } = require("./storage");
@@ -272,7 +282,17 @@ const client = new Client({
 
 const app = express();
 const invitePermissions = new PermissionsBitField([
-  PermissionsBitField.Flags.Administrator,
+  PermissionFlagsBits.ViewChannel,
+  PermissionFlagsBits.SendMessages,
+  PermissionFlagsBits.SendMessagesInThreads,
+  PermissionFlagsBits.ReadMessageHistory,
+  PermissionFlagsBits.EmbedLinks,
+  PermissionFlagsBits.AddReactions,
+  PermissionFlagsBits.ManageMessages,
+  PermissionFlagsBits.ModerateMembers,
+  PermissionFlagsBits.ManageRoles,
+  PermissionFlagsBits.ManageChannels,
+  PermissionFlagsBits.KickMembers,
 ]).bitfield.toString();
 const addBotUrl =
   `https://discord.com/oauth2/authorize?client_id=${config.clientId}` +
@@ -280,8 +300,8 @@ const addBotUrl =
 const authPopupStaticDir = resolveAuthPopupStaticDir();
 
 app.set("trust proxy", 1);
-app.use(express.json());
-app.use(express.urlencoded({ extended: false }));
+app.use(express.json({ limit: "64kb" }));
+app.use(express.urlencoded({ extended: false, limit: "64kb" }));
 app.use(
   session({
     name: config.sessionCookieName,
@@ -299,6 +319,9 @@ app.use(
 );
 app.use(express.static(path.join(process.cwd(), "public")));
 app.use("/images", express.static(path.join(process.cwd(), "images")));
+app.get("/vendor/continental-id-client.js", (request, response) => {
+  response.sendFile(continentalIdBrowserGlobalPath);
+});
 if (authPopupStaticDir) {
   app.use("/auth-popup", express.static(authPopupStaticDir));
   app.get("/auth-popup", (request, response) => {
@@ -490,8 +513,10 @@ app.post("/auth/session", requireCsrfToken, async (request, response, next) => {
     const authPayload = await fetchAuthProfile(accessToken);
     const sessionUser = buildSessionUser(authPayload);
 
+    await regenerateSession(request);
     request.session.accessToken = accessToken;
     request.session.user = sessionUser;
+    request.session.csrfToken = crypto.randomBytes(32).toString("hex");
 
     response
       .set("X-Auth-Correlation-Id", correlationId)
@@ -507,6 +532,7 @@ app.post("/auth/session", requireCsrfToken, async (request, response, next) => {
         sessionEstablished: true,
       },
       correlationId,
+      csrfToken: request.session.csrfToken,
       discordLinked: sessionUser.discordLinked,
       user: sessionUser,
     });
@@ -674,11 +700,11 @@ app.post("/dashboard/:guildId", requireAuthPage, requireCsrfToken, async (reques
       ...validateSuggestionSettings(settings, guild, botMember),
       ...validateTicketSettings(settings, guild, botMember),
       ...validateLevelingSettings(settings, guild, botMember),
-      ...validateReactionRoleSettings(settings, guild),
+      ...validateReactionRoleSettings(settings, guild, botMember),
       ...validateAntiRaidSettings(settings, guild, botMember),
-      ...validateAutomationSettings(settings, guild),
-      ...validateModmailSettings(settings, guild),
-      ...validateApplicationSettings(settings, guild),
+      ...validateAutomationSettings(settings, guild, botMember),
+      ...validateModmailSettings(settings, guild, botMember),
+      ...validateApplicationSettings(settings, guild, botMember),
       ...validateAiToolsSettings(settings, guild, botMember),
       ...getRuntimeModuleValidationErrors(settings),
     ];
@@ -773,6 +799,11 @@ app.use((error, request, response, next) => {
 
   if (response.headersSent) {
     next(error);
+    return;
+  }
+
+  if (error.type === "entity.too.large") {
+    response.status(413).send("Request payload too large.");
     return;
   }
 
@@ -964,6 +995,16 @@ client.on(Events.MessageCreate, async (message) => {
     return;
   }
 
+  const modmailReply = await runIsolatedGuildTask(
+    message.guild.id,
+    "modmail staff reply",
+    () => handleModmailStaffReply(message),
+    { handled: false },
+  );
+  if (modmailReply?.handled) {
+    return;
+  }
+
   const settings = getGuildSettings(message.guild.id);
   const moderationResult = await runIsolatedGuildTask(
     message.guild.id,
@@ -1030,7 +1071,12 @@ async function replyWithRuntimeError(interaction) {
     ephemeral: true,
   };
 
-  if (interaction.deferred || interaction.replied) {
+  if (interaction.deferred) {
+    await interaction.editReply(payload).catch(() => null);
+    return;
+  }
+
+  if (interaction.replied) {
     await interaction.followUp(payload).catch(() => null);
     return;
   }
@@ -1270,6 +1316,7 @@ async function handleSuggestionCommand(interaction) {
   });
 
   await runSuggestionAutomation(interaction.guild, settings, {
+    member: interaction.member,
     suggestionNumber,
     userTag: interaction.user.tag,
   });
@@ -1287,7 +1334,8 @@ async function handleApplicationCommand(interaction) {
   await interaction.guild.channels.fetch();
   await interaction.guild.roles.fetch();
   const settings = getGuildSettings(interaction.guildId);
-  const errors = validateApplicationSettings(settings, interaction.guild);
+  const botMember = await getBotGuildMember(interaction.guild).catch(() => null);
+  const errors = validateApplicationSettings(settings, interaction.guild, botMember);
   if (!settings.applicationsEnabled || errors.length > 0) {
     await interaction.reply({
       content: errors[0] || "Applications are disabled in this server.",
@@ -1337,7 +1385,8 @@ async function handleApplicationModalSubmit(interaction) {
   await interaction.guild.channels.fetch();
   await interaction.guild.roles.fetch();
   const settings = getGuildSettings(interaction.guildId);
-  const errors = validateApplicationSettings(settings, interaction.guild);
+  const botMember = await getBotGuildMember(interaction.guild).catch(() => null);
+  const errors = validateApplicationSettings(settings, interaction.guild, botMember);
   if (!settings.applicationsEnabled || errors.length > 0) {
     await interaction.reply({
       content: errors[0] || "Applications are disabled in this server.",
@@ -1586,7 +1635,8 @@ async function handleModmailInbound(message) {
         continue;
       }
 
-      const errors = validateModmailSettings(settings, guild);
+      const botMember = await getBotGuildMember(guild).catch(() => null);
+      const errors = validateModmailSettings(settings, guild, botMember);
       if (errors.length > 0) {
         continue;
       }
@@ -1596,7 +1646,7 @@ async function handleModmailInbound(message) {
         continue;
       }
 
-      await inboxChannel.send({
+      const forwardedMessage = await inboxChannel.send({
         allowedMentions: settings.modmailStaffRoleId
           ? { parse: [], roles: [settings.modmailStaffRoleId] }
           : { parse: [] },
@@ -1609,9 +1659,18 @@ async function handleModmailInbound(message) {
           .filter(Boolean)
           .join("\n"),
       });
+      saveModmailMessageMapping({
+        guildId: guild.id,
+        inboxMessageId: forwardedMessage.id,
+        userId: message.author.id,
+        userTag: message.author.tag,
+      });
 
       if (settings.modmailAutoReply) {
-        await message.reply(settings.modmailAutoReply).catch(() => null);
+        await message.reply({
+          allowedMentions: { parse: [] },
+          content: settings.modmailAutoReply,
+        }).catch(() => null);
       }
       return;
     } catch (error) {
@@ -1619,6 +1678,59 @@ async function handleModmailInbound(message) {
       console.error(error);
     }
   }
+}
+
+async function handleModmailStaffReply(message) {
+  const referenceId = getModmailReferenceId(message);
+  if (!referenceId) {
+    return { handled: false };
+  }
+
+  const mapping = getModmailMessageMapping(referenceId);
+  if (!mapping) {
+    return { handled: false };
+  }
+
+  const settings = getGuildSettings(message.guild.id);
+  const staffMember = message.member || await message.guild.members.fetch(message.author.id).catch(() => null);
+  if (!canStaffReplyToModmail(message, settings, mapping, staffMember)) {
+    return { handled: false };
+  }
+
+  const content = getModmailReplyContent(message);
+  if (!content) {
+    await message.reply({
+      allowedMentions: { parse: [] },
+      content: "Write a text reply to deliver to the member.",
+    }).catch(() => null);
+    return { handled: true };
+  }
+
+  const user = await client.users.fetch(mapping.userId).catch(() => null);
+  if (!user) {
+    await message.reply({
+      allowedMentions: { parse: [] },
+      content: "Blueprint could not find that member's Discord account.",
+    }).catch(() => null);
+    return { handled: true };
+  }
+
+  try {
+    await user.send({
+      allowedMentions: { parse: [] },
+      content: `💬 Staff reply from ${message.author.tag}:\n${content}`,
+    });
+    await message.react("✅").catch(() => null);
+  } catch (error) {
+    console.error(`Failed to deliver modmail reply to ${mapping.userId}.`);
+    console.error(error);
+    await message.reply({
+      allowedMentions: { parse: [] },
+      content: "Blueprint could not deliver that reply. The member may have DMs disabled.",
+    }).catch(() => null);
+  }
+
+  return { handled: true };
 }
 
 async function syncStarboardReaction(reaction, user) {
@@ -1733,6 +1845,9 @@ async function evaluateAntiRaid(guild, settings) {
     await alertChannel.send({
       allowedMentions: { parse: [] },
       content: `🚨 Anti-raid triggered: ${state.joinTimestamps.length} joins within ${settings.antiRaidWindowSeconds}s. Applying temporary slowmode lockdown for ${settings.antiRaidLockdownMinutes} minute(s).`,
+    }).catch((error) => {
+      console.error(`Failed to send an anti-raid alert for guild ${guild.id}.`);
+      console.error(error);
     });
   }
 
@@ -1744,16 +1859,19 @@ async function evaluateAntiRaid(guild, settings) {
       continue;
     }
 
-    if (!state.previousSlowmodes.has(channel.id)) {
-      state.previousSlowmodes.set(channel.id, Math.max(0, channel.rateLimitPerUser || 0));
-    }
-
     const nextSlowmode = getLockdownSlowmodeSeconds(
       channel.rateLimitPerUser,
       DEFAULT_ANTI_RAID_SLOWMODE_SECONDS,
     );
     if (nextSlowmode === channel.rateLimitPerUser) {
       continue;
+    }
+
+    if (!state.previousSlowmodes.has(channel.id)) {
+      state.previousSlowmodes.set(channel.id, {
+        applied: nextSlowmode,
+        previous: Math.max(0, channel.rateLimitPerUser || 0),
+      });
     }
 
     await channel.setRateLimitPerUser(nextSlowmode, "Blueprint anti-raid lockdown").catch(() => null);
@@ -1786,11 +1904,12 @@ async function releaseAntiRaidLockdown(guildId, { force = false } = {}) {
   if (!guild) {
     state.previousSlowmodes.clear();
     state.lockedUntil = 0;
+    raidTracker.delete(guildId);
     return;
   }
 
   await guild.channels.fetch().catch(() => null);
-  for (const [channelId, previousSlowmode] of state.previousSlowmodes.entries()) {
+  for (const [channelId, lockdown] of state.previousSlowmodes.entries()) {
     const channel = guild.channels.cache.get(channelId);
     if (
       !channel ||
@@ -1801,18 +1920,19 @@ async function releaseAntiRaidLockdown(guildId, { force = false } = {}) {
       continue;
     }
 
-    if (channel.rateLimitPerUser === previousSlowmode) {
+    if (channel.rateLimitPerUser !== lockdown.applied) {
       continue;
     }
 
     await channel.setRateLimitPerUser(
-      previousSlowmode,
+      lockdown.previous,
       "Blueprint anti-raid lockdown ended",
     ).catch(() => null);
   }
 
   state.previousSlowmodes.clear();
   state.lockedUntil = 0;
+  raidTracker.delete(guildId);
 }
 
 function stopAntiRaidTracking() {
@@ -1877,7 +1997,7 @@ async function syncReactionRole(reaction, user, isRemoval) {
     return;
   }
   const role = message.guild.roles.cache.get(settings.reactionRolesRoleId);
-  if (!role) {
+  if (!role || !role.editable) {
     return;
   }
 
@@ -1956,13 +2076,31 @@ async function executeAutomationAction(guild, settings, payload) {
   }
 
   if (settings.automationsAction === "create_ticket") {
-    const ticketChannel = guild.channels.cache.get(settings.ticketsIntakeChannelId) || logChannel;
-    if (ticketChannel.isTextBased()) {
-      await ticketChannel.send({
+    const opener = payload.member?.user || payload.member || payload.context?.member?.user || payload.context?.member;
+    if (!opener?.id) {
+      await logChannel.send({
         allowedMentions: { parse: [] },
-        content: `🎫 Automation created a ticket placeholder (${payload.source}).`,
+        content: `🎫 Automation could not create a ticket for ${payload.source}: no member context was available.`,
       });
+      return;
     }
+
+    const botMember = guild.members.me || await getBotGuildMember(guild).catch(() => null);
+    const context = [
+      `Automation source: ${payload.source}`,
+      payload.context?.suggestionNumber
+        ? `Suggestion #${payload.context.suggestionNumber}`
+        : "",
+    ]
+      .filter(Boolean)
+      .join(" · ");
+    const ticket = await createTicketForUser(guild, settings, botMember, opener, { context });
+    await logChannel.send({
+      allowedMentions: { parse: [] },
+      content: ticket.created
+        ? `🎫 Automation created ${ticket.message} (${payload.source}).`
+        : `🎫 Automation could not create a ticket (${payload.source}): ${ticket.message}`,
+    });
     return;
   }
 
@@ -2070,6 +2208,19 @@ function ensureCsrfToken(request, response, next) {
   }
 
   next();
+}
+
+function regenerateSession(request) {
+  return new Promise((resolve, reject) => {
+    request.session.regenerate((error) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+
+      resolve();
+    });
+  });
 }
 
 function shouldIssueCsrfToken(request) {
@@ -2266,6 +2417,7 @@ async function fetchAuthJson(
     method,
     headers,
     body: body === undefined ? undefined : JSON.stringify(body),
+    signal: AbortSignal.timeout(config.authRequestTimeoutSeconds * 1000),
   });
 
   const payload = await result.json().catch(() => ({}));
@@ -2662,20 +2814,27 @@ function resolveAuthPopupStaticDir() {
 }
 
 async function start() {
-  await client.login(config.token);
-
   const server = app.listen(config.port, () => {
     console.log(`Control center running at ${config.baseUrl}`);
   });
 
   registerShutdownHandlers(server);
+
+  try {
+    await client.login(config.token);
+  } catch (error) {
+    await new Promise((resolve) => server.close(resolve));
+    throw error;
+  }
 }
 
-start().catch((error) => {
-  console.error("Failed to start app.");
-  console.error(error);
-  process.exit(1);
-});
+if (require.main === module) {
+  start().catch((error) => {
+    console.error("Failed to start app.");
+    console.error(error);
+    process.exit(1);
+  });
+}
 
 function registerShutdownHandlers(server) {
   let shuttingDown = false;
@@ -2712,3 +2871,9 @@ function registerShutdownHandlers(server) {
     void shutdown("SIGINT");
   });
 }
+
+module.exports = {
+  app,
+  client,
+  start,
+};

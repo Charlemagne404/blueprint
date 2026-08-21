@@ -1,5 +1,13 @@
+const { PermissionFlagsBits } = require("discord.js");
 const { escapeHtml, renderModuleCard, renderModuleFacts } = require("../html");
-const { getChannelLabel, normalizeId, normalizeInteger, normalizeText } = require("./common");
+const {
+  canSendMessages,
+  getChannelLabel,
+  isAssignableRole,
+  normalizeId,
+  normalizeInteger,
+  normalizeText,
+} = require("./common");
 
 const AUTOMATION_TRIGGERS = ["member_join", "keyword", "suggestion_created"];
 const AUTOMATION_ACTIONS = ["send_message", "create_ticket", "assign_role"];
@@ -24,7 +32,7 @@ function normalizeAutomationSettings(input = {}) {
   };
 }
 
-function validateAutomationSettings(settings, guild) {
+function validateAutomationSettings(settings, guild, botMember) {
   if (!settings.automationsEnabled) {
     return [];
   }
@@ -33,12 +41,43 @@ function validateAutomationSettings(settings, guild) {
     return ["Choose an automations log channel before enabling this module."];
   }
 
-  if (!guild.channels.cache.has(settings.automationsLogChannelId)) {
+  const logChannel = guild.channels.cache.get(settings.automationsLogChannelId);
+  if (!logChannel) {
     return ["Choose a valid automations log channel in this server."];
+  }
+
+  if (botMember && !canSendMessages(logChannel, botMember)) {
+    return ["Choose an automations log channel where Blueprint can post rule activity."];
   }
 
   if (settings.automationsTrigger === "keyword" && !settings.automationsKeyword) {
     return ["Enter a keyword trigger phrase for your automation rule."];
+  }
+
+  if (settings.automationsAction === "create_ticket") {
+    if (!settings.ticketsEnabled || !settings.ticketsIntakeChannelId) {
+      return ["Enable and configure Tickets before using the Create ticket action."];
+    }
+
+    const intakeChannel = guild.channels.cache.get(settings.ticketsIntakeChannelId);
+    if (!intakeChannel) {
+      return ["Choose a valid ticket intake channel for the Create ticket action."];
+    }
+
+    if (botMember && !botMember.permissions.has(PermissionFlagsBits.ManageChannels)) {
+      return ["Blueprint needs Manage Channels permission before an automation can create tickets."];
+    }
+  }
+
+  if (settings.automationsAction === "assign_role") {
+    if (!settings.autoRoleEnabled || !settings.autoRoleRoleId) {
+      return ["Enable and configure Auto role before using the Assign role action."];
+    }
+
+    const role = guild.roles.cache.get(settings.autoRoleRoleId);
+    if (!role || !isAssignableRole(role, botMember)) {
+      return ["Choose an assignable Auto role before using the Assign role action."];
+    }
   }
 
   return [];
@@ -55,6 +94,19 @@ function getAutomationState(settings, channelOptions = []) {
   }
 
   if (settings.automationsTrigger === "keyword" && !settings.automationsKeyword) {
+    return "incomplete";
+  }
+
+  if (
+    settings.automationsAction === "create_ticket" &&
+    (!settings.ticketsEnabled || !settings.ticketsIntakeChannelId ||
+      (channelOptions.length > 0 &&
+        !channelOptions.some((channel) => channel.id === settings.ticketsIntakeChannelId)))
+  ) {
+    return "incomplete";
+  }
+
+  if (settings.automationsAction === "assign_role" && (!settings.autoRoleEnabled || !settings.autoRoleRoleId)) {
     return "incomplete";
   }
 

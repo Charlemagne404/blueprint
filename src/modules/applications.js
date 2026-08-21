@@ -1,5 +1,11 @@
 const { escapeHtml, renderModuleCard, renderModuleFacts } = require("../html");
-const { getChannelLabel, getRoleLabel, normalizeId, normalizeText } = require("./common");
+const {
+  canSendMessages,
+  getChannelLabel,
+  getRoleLabel,
+  normalizeId,
+  normalizeText,
+} = require("./common");
 
 const defaults = {
   applicationsEnabled: false,
@@ -23,7 +29,7 @@ function normalizeApplicationSettings(input = {}) {
   };
 }
 
-function validateApplicationSettings(settings, guild) {
+function validateApplicationSettings(settings, guild, botMember) {
   if (!settings.applicationsEnabled) return [];
 
   const prompts = getApplicationPrompts(settings);
@@ -40,8 +46,13 @@ function validateApplicationSettings(settings, guild) {
     return ["Choose an applications destination channel before enabling this module."];
   }
 
-  if (!guild.channels.cache.has(settings.applicationsChannelId)) {
+  const destination = guild.channels.cache.get(settings.applicationsChannelId);
+  if (!destination) {
     return ["Choose a valid applications destination channel in this server."];
+  }
+
+  if (botMember && !canSendMessages(destination, botMember)) {
+    return ["Choose an applications channel where Blueprint can post submissions."];
   }
 
   if (!settings.applicationsReviewerRoleId) {

@@ -2,8 +2,8 @@ const { escapeHtml, renderModuleCard, renderModuleFacts } = require("../html");
 const {
   getChannelLabel,
   getRoleLabel,
+  isAssignableRole,
   normalizeId,
-  normalizeInteger,
   normalizeText,
 } = require("./common");
 
@@ -25,13 +25,16 @@ function normalizeReactionRoleSettings(input = {}) {
     reactionRolesMessageId: normalizeId(input.reactionRolesMessageId),
     reactionRolesRoleId: normalizeId(input.reactionRolesRoleId),
     reactionRolesEmoji: normalizeText(input.reactionRolesEmoji, defaults.reactionRolesEmoji, 10),
-    reactionRolesMaxPerMember: normalizeInteger(input.reactionRolesMaxPerMember, 1, 1, 25),
+    // This module currently supports one configured role per reaction message.
+    // Keep the legacy field for storage compatibility, but never expose an
+    // option that suggests the runtime supports a multi-role menu.
+    reactionRolesMaxPerMember: 1,
     reactionRolesRemoveOnUnreact:
       input.reactionRolesRemoveOnUnreact === true || input.reactionRolesRemoveOnUnreact === "on",
   };
 }
 
-function validateReactionRoleSettings(settings, guild) {
+function validateReactionRoleSettings(settings, guild, botMember) {
   if (!settings.reactionRolesEnabled) {
     return [];
   }
@@ -52,8 +55,13 @@ function validateReactionRoleSettings(settings, guild) {
     return ["Choose a role to assign when members react."];
   }
 
-  if (!guild.roles.cache.has(settings.reactionRolesRoleId)) {
-    return ["Choose a valid assignable role for reaction roles."];
+  const role = guild.roles.cache.get(settings.reactionRolesRoleId);
+  if (!role) {
+    return ["Choose a valid role for reaction roles."];
+  }
+
+  if (!isAssignableRole(role, botMember)) {
+    return ["Choose a role below Blueprint's highest role and grant Blueprint Manage Roles."];
   }
 
   return [];
@@ -130,10 +138,6 @@ function renderReactionRoleModuleCard({
       label: "Role",
       valueHtml: escapeHtml(getRoleLabel(settings.reactionRolesRoleId, roleOptions)),
     },
-    {
-      label: "Max roles",
-      valueHtml: escapeHtml(String(settings.reactionRolesMaxPerMember)),
-    },
   ]);
 
   return renderModuleCard({
@@ -172,16 +176,6 @@ function renderReactionRoleModuleCard({
               />
             </label>
 
-            <label>
-              <span>Max selectable roles per member</span>
-              <input
-                type="number"
-                min="1"
-                max="25"
-                name="reactionRolesMaxPerMember"
-                value="${escapeHtml(String(settings.reactionRolesMaxPerMember))}"
-              />
-            </label>
           </div>
 
           <div class="subsection">
@@ -216,7 +210,7 @@ function renderReactionRoleModuleCard({
     checked: settings.reactionRolesEnabled,
     blockerHtml: escapeHtml(blockerText),
     defaultOpen,
-    descriptionHtml: "Let members self-assign roles from a configured reaction message.",
+    descriptionHtml: "Let members self-assign one configured role from a reaction message.",
     eyebrow: "Reaction roles",
     inputName: "reactionRolesEnabled",
     moduleKey: "reactionRoles",

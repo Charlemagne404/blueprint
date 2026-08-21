@@ -184,6 +184,16 @@ db.exec(`
   )
 `);
 
+db.exec(`
+  CREATE TABLE IF NOT EXISTS modmail_message_map (
+    inbox_message_id TEXT PRIMARY KEY,
+    guild_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    user_tag TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )
+`);
+
 ensureColumn("countdown_enabled", "INTEGER NOT NULL DEFAULT 0");
 ensureColumn("countdown_title", "TEXT NOT NULL DEFAULT ''");
 ensureColumn("countdown_target_date", "TEXT NOT NULL DEFAULT ''");
@@ -393,10 +403,7 @@ function getGuildSettings(guildId) {
     reactionRolesMessageId: row.reaction_roles_message_id,
     reactionRolesRoleId: row.reaction_roles_role_id,
     reactionRolesEmoji: row.reaction_roles_emoji || reactionRoleDefaults.reactionRolesEmoji,
-    reactionRolesMaxPerMember: normalizeInteger(
-      row.reaction_roles_max_per_member,
-      reactionRoleDefaults.reactionRolesMaxPerMember,
-    ),
+    reactionRolesMaxPerMember: reactionRoleDefaults.reactionRolesMaxPerMember,
     reactionRolesRemoveOnUnreact: Boolean(row.reaction_roles_remove_on_unreact),
     antiRaidEnabled: Boolean(row.anti_raid_enabled),
     antiRaidAlertChannelId: row.anti_raid_alert_channel_id,
@@ -741,6 +748,7 @@ module.exports = {
   getCountdownAlertLastSentOn,
   getGuildSettings,
   getLevelingMemberStats,
+  getModmailMessageMapping,
   getStarboardEntry,
   getTicketByChannel,
   getTicketByUser,
@@ -748,6 +756,7 @@ module.exports = {
   saveGuildSettings,
   setCountdownAlertLastSentOn,
   setTicketPanelState,
+  saveModmailMessageMapping,
   upsertLevelingMemberStats,
   upsertStarboardEntry,
   upsertTicket,
@@ -946,6 +955,49 @@ function closeTicketForChannel(guildId, channelId) {
     DELETE FROM ticket_open_tickets
     WHERE guild_id = ? AND channel_id = ?
   `).run(guildId, channelId);
+}
+
+function getModmailMessageMapping(inboxMessageId) {
+  const row = db
+    .prepare(`
+      SELECT inbox_message_id, guild_id, user_id, user_tag, created_at
+      FROM modmail_message_map
+      WHERE inbox_message_id = ?
+    `)
+    .get(inboxMessageId);
+
+  if (!row) {
+    return null;
+  }
+
+  return {
+    createdAt: row.created_at,
+    guildId: row.guild_id,
+    inboxMessageId: row.inbox_message_id,
+    userId: row.user_id,
+    userTag: row.user_tag,
+  };
+}
+
+function saveModmailMessageMapping({ inboxMessageId, guildId, userId, userTag = "" }) {
+  if (!inboxMessageId || !guildId || !userId) {
+    return null;
+  }
+
+  db.prepare(`
+    INSERT INTO modmail_message_map (
+      inbox_message_id,
+      guild_id,
+      user_id,
+      user_tag
+    ) VALUES (?, ?, ?, ?)
+    ON CONFLICT(inbox_message_id) DO UPDATE SET
+      guild_id = excluded.guild_id,
+      user_id = excluded.user_id,
+      user_tag = excluded.user_tag
+  `).run(inboxMessageId, guildId, userId, userTag);
+
+  return getModmailMessageMapping(inboxMessageId);
 }
 
 function getStarboardEntry(sourceMessageId) {

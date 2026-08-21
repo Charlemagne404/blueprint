@@ -67,11 +67,13 @@ function evaluateDashboardModules({
   const suggestionErrors = canValidate ? validateSuggestionSettings(settings, guild, botMember) : [];
   const ticketErrors = canValidate ? validateTicketSettings(settings, guild, botMember) : [];
   const levelingErrors = canValidate ? validateLevelingSettings(settings, guild, botMember) : [];
-  const reactionRoleErrors = canValidate ? validateReactionRoleSettings(settings, guild) : [];
+  const reactionRoleErrors = canValidate
+    ? validateReactionRoleSettings(settings, guild, botMember)
+    : [];
   const antiRaidErrors = canValidate ? validateAntiRaidSettings(settings, guild, botMember) : [];
-  const automationErrors = canValidate ? validateAutomationSettings(settings, guild) : [];
-  const modmailErrors = canValidate ? validateModmailSettings(settings, guild) : [];
-  const applicationErrors = canValidate ? validateApplicationSettings(settings, guild) : [];
+  const automationErrors = canValidate ? validateAutomationSettings(settings, guild, botMember) : [];
+  const modmailErrors = canValidate ? validateModmailSettings(settings, guild, botMember) : [];
+  const applicationErrors = canValidate ? validateApplicationSettings(settings, guild, botMember) : [];
   const aiToolsErrors = canValidate ? validateAiToolsSettings(settings, guild, botMember) : [];
 
   const reactionRoleState = getReactionRoleState(settings, channelOptions);

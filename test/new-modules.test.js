@@ -1,9 +1,17 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 
-const { normalizeReactionRoleSettings, getReactionRoleState } = require("../src/modules/reaction-roles");
+const {
+  getReactionRoleState,
+  normalizeReactionRoleSettings,
+  validateReactionRoleSettings,
+} = require("../src/modules/reaction-roles");
 const { normalizeAntiRaidSettings, getAntiRaidState } = require("../src/modules/anti-raid");
-const { normalizeAutomationSettings, getAutomationState } = require("../src/modules/automations");
+const {
+  getAutomationState,
+  normalizeAutomationSettings,
+  validateAutomationSettings,
+} = require("../src/modules/automations");
 const { normalizeModmailSettings, getModmailState } = require("../src/modules/modmail");
 const {
   getApplicationPrompts,
@@ -23,8 +31,29 @@ test("reaction roles normalize and require complete setup", () => {
   });
 
   assert.equal(settings.reactionRolesEnabled, true);
-  assert.equal(settings.reactionRolesMaxPerMember, 5);
+  assert.equal(settings.reactionRolesMaxPerMember, 1);
   assert.equal(getReactionRoleState(settings, [{ id: "123456789012345678", label: "#roles" }]), "live");
+});
+
+test("reaction roles require a role Blueprint can manage", () => {
+  const settings = normalizeReactionRoleSettings({
+    reactionRolesEnabled: "on",
+    reactionRolesChannelId: "123456789012345678",
+    reactionRolesMessageId: "123456789012345679",
+    reactionRolesRoleId: "123456789012345680",
+  });
+  const guild = { id: "123456789012345670", channels: { cache: new Map() }, roles: { cache: new Map() } };
+  const role = { guild, id: settings.reactionRolesRoleId, managed: false };
+  guild.channels.cache.set(settings.reactionRolesChannelId, {});
+  guild.roles.cache.set(role.id, role);
+
+  assert.match(validateReactionRoleSettings(settings, guild)[0], /Manage Roles/i);
+
+  const botMember = {
+    permissions: { has: () => true },
+    roles: { highest: { comparePositionTo: () => 1 } },
+  };
+  assert.deepEqual(validateReactionRoleSettings(settings, guild, botMember), []);
 });
 
 test("anti-raid state stays incomplete without alert channel", () => {
@@ -41,6 +70,36 @@ test("automations keyword trigger requires phrase", () => {
   });
 
   assert.equal(getAutomationState(settings, [{ id: "123456789012345678", label: "#ops" }]), "incomplete");
+});
+
+test("automation ticket actions require the ticket module", () => {
+  const settings = normalizeAutomationSettings({
+    automationsEnabled: "on",
+    automationsLogChannelId: "123456789012345678",
+    automationsAction: "create_ticket",
+  });
+  settings.ticketsEnabled = false;
+  settings.ticketsIntakeChannelId = "223456789012345678";
+
+  assert.equal(
+    getAutomationState(settings, [
+      { id: "123456789012345678", label: "#ops" },
+      { id: "223456789012345678", label: "#tickets" },
+    ]),
+    "incomplete",
+  );
+
+  settings.ticketsEnabled = true;
+  const guild = {
+    channels: {
+      cache: new Map([
+        ["123456789012345678", { id: "123456789012345678" }],
+        ["223456789012345678", { id: "223456789012345678" }],
+      ]),
+    },
+    roles: { cache: new Map() },
+  };
+  assert.deepEqual(validateAutomationSettings(settings, guild), []);
 });
 
 test("modmail and applications states become live when channel/role exist", () => {

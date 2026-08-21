@@ -137,9 +137,14 @@ function renderAiToolsModuleCard({
           </div>
         </div>
 
-        <aside class="preview-card">
+        <aside class="preview-card preview-card-ai">
           <span class="preview-label">Module summary</span>
-          <div class="countdown-preview">${escapeHtml(getAiToolsPreview(settings, channelOptions, state))}</div>
+          <div class="preview-surface preview-surface-ai">
+            <span class="ai-preview-kicker">
+              ${escapeHtml(settings.aiToolsRequireMention ? "Mention-gated replies" : "Open channel replies")}
+            </span>
+            <p class="ai-preview-copy">${escapeHtml(getAiToolsPreview(settings, channelOptions, state))}</p>
+          </div>
           <div class="preview-meta preview-meta-dual">
             <div>
               <span>Status</span>
@@ -165,7 +170,7 @@ function renderAiToolsModuleCard({
     moduleId: "ai-tools",
     statusHtml,
     summaryHtml,
-    theme: "welcome",
+    theme: "ai-tools",
     titleHtml: "AI helper workspace",
   });
 }

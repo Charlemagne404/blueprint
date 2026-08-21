@@ -1,5 +1,11 @@
 const { escapeHtml, renderModuleCard, renderModuleFacts } = require("../html");
-const { getChannelLabel, getRoleLabel, normalizeId, normalizeText } = require("./common");
+const {
+  canSendMessages,
+  getChannelLabel,
+  getRoleLabel,
+  normalizeId,
+  normalizeText,
+} = require("./common");
 
 const defaults = {
   modmailEnabled: false,
@@ -21,15 +27,20 @@ function normalizeModmailSettings(input = {}) {
   };
 }
 
-function validateModmailSettings(settings, guild) {
+function validateModmailSettings(settings, guild, botMember) {
   if (!settings.modmailEnabled) return [];
 
   if (!settings.modmailInboxChannelId) {
     return ["Choose a modmail inbox channel before enabling this module."];
   }
 
-  if (!guild.channels.cache.has(settings.modmailInboxChannelId)) {
+  const inbox = guild.channels.cache.get(settings.modmailInboxChannelId);
+  if (!inbox) {
     return ["Choose a valid modmail inbox channel in this server."];
+  }
+
+  if (botMember && !canSendMessages(inbox, botMember)) {
+    return ["Choose a modmail inbox where Blueprint can post incoming messages."];
   }
 
   if (!settings.modmailStaffRoleId) {
@@ -106,7 +117,7 @@ function renderModmailModuleCard({ blockerText = "", channelOptions, defaultOpen
     checked: settings.modmailEnabled,
     blockerHtml: escapeHtml(blockerText),
     defaultOpen,
-    descriptionHtml: "Route member DMs into a private staff inbox with role-based handling.",
+    descriptionHtml: "Route member DMs into a private staff inbox and reply by replying to a forwarded message.",
     eyebrow: "Modmail",
     inputName: "modmailEnabled",
     moduleKey: "modmail",
@@ -137,5 +148,5 @@ function getPreview(settings, channelOptions, roleOptions, state) {
     return "Modmail needs an inbox channel and staff role before activation.";
   }
 
-  return `Member DMs are mirrored to ${getChannelLabel(settings.modmailInboxChannelId, channelOptions)} and assigned to ${getRoleLabel(settings.modmailStaffRoleId, roleOptions)}.`;
+  return `Member DMs are mirrored to ${getChannelLabel(settings.modmailInboxChannelId, channelOptions)}. Staff with ${getRoleLabel(settings.modmailStaffRoleId, roleOptions)} can reply from the inbox.`;
 }

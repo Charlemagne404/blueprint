@@ -63,7 +63,7 @@ function renderLayout({
   ]);
   const authButton = sessionUser
     ? `<a class="button button-ghost" href="/logout">Log out</a>`
-    : `<button class="button button-ghost" id="login-button" type="button">Log in</button>`;
+    : `<button class="button button-ghost" id="login-button" type="button">Continue with Continental ID</button>`;
 
   const authMeta = sessionUser
     ? `<div class="user-chip">
@@ -92,10 +92,6 @@ function renderLayout({
           <span>Made by</span>
           <img src="/images/made-by-continental-white.png" alt="Continental" />
         </div>
-        <p>
-          Blueprint keeps its dashboard-first Discord control workflow while staying connected
-          to the Continental toolset.
-        </p>
       </div>
       <nav class="site-footer-nav" aria-label="Footer">
         <a href="https://github.com/Charlemagne404" target="_blank" rel="noopener noreferrer">GitHub</a>
@@ -172,6 +168,7 @@ function renderLayout({
     <script>
       window.BLUEPRINT_AUTH = ${JSON.stringify(authConfig)};
     </script>
+    <script src="/vendor/continental-id-client.js"></script>
     <script src="/app.js"></script>
   </body>
 </html>`;
@@ -225,10 +222,10 @@ function getDashboardOnboardingState({
       headline: "Run Blueprint from one polished server dashboard.",
       key: "signed-out",
       lede:
-        "Sign in with Continental ID to unlock the dashboard, link Discord, and manage installed servers without burying staff inside long slash commands.",
+        "Continue with Continental ID to unlock the dashboard, link Discord, and manage installed servers without burying staff inside long slash commands.",
       primaryAction: {
         id: "login-button",
-        label: "Sign in with Continental ID",
+        label: "Continue with Continental ID",
         type: "button",
       },
       progressLabel: "Start with sign-in",
@@ -241,7 +238,7 @@ function getDashboardOnboardingState({
       },
       stats: [],
       steps: [
-        { label: "Sign in with Continental ID", status: "current", statusLabel: "Start" },
+        { label: "Continue with Continental ID", status: "current", statusLabel: "Start" },
         { label: "Link the Discord account you use to manage servers", status: "pending", statusLabel: "Next" },
         { label: "Install Blueprint in a server and finish setup", status: "pending", statusLabel: "Later" },
       ],
@@ -483,7 +480,7 @@ function renderHome({ addBotUrl, authConfig, guilds = [], sessionUser }) {
           <section class="info-card">
             <h2>How access works</h2>
             <ol class="feature-list feature-list-ordered">
-              <li>Sign in with Continental ID</li>
+              <li>Continue with Continental ID</li>
               <li>Use the Discord account linked to that identity</li>
               <li>Manage only the servers where Blueprint is installed and you have rights</li>
             </ol>
@@ -1492,14 +1489,14 @@ function renderAuthComplete({ authConfig, returnTo, sessionUser }) {
         <p class="eyebrow">Continental ID</p>
         <h1>Finishing sign-in</h1>
         <p class="lede">
-          This page refreshes your Dashboard session, syncs it into Blueprint, and returns you
-          to the control center.
+          This page refreshes your Dashboard session, reuses any active Continental ID session it
+          finds, syncs it into Blueprint, and returns you to the control center.
         </p>
         <div class="hero-actions">
-          <button class="button" id="relogin-button" type="button">Open sign-in</button>
+          <button class="button" id="relogin-button" type="button">Continue with Continental ID</button>
         </div>
         <p class="helper-text" data-auth-complete="true" data-return-to="${escapeHtml(returnTo)}">
-          Waiting for an active Continental ID session.
+          Waiting for an active Continental ID session. If this device is already signed in, Blueprint will reuse it.
         </p>
       </section>
     </main>

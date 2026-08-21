@@ -9,6 +9,7 @@ const {
 const {
   clearTicketPanelState,
   closeTicketForChannel,
+  closeTicketForUser,
   getTicketByChannel,
   getTicketByUser,
   getTicketPanelState,
@@ -18,6 +19,7 @@ const {
 
 const OPEN_TICKET_CUSTOM_ID = "tickets:open";
 const CLOSE_TICKET_CUSTOM_ID = "tickets:close";
+const pendingTicketOpeners = new Set();
 
 function buildTicketPanelPayload(settings) {
   return {
@@ -89,90 +91,125 @@ async function openTicket(interaction, settings, botMember) {
     return "Tickets can only be opened inside a server.";
   }
 
+  const result = await createTicketForUser(interaction.guild, settings, botMember, interaction.user);
+  return result.message;
+}
+
+async function createTicketForUser(guild, settings, botMember, user, { context = "" } = {}) {
+  if (!guild || !user?.id) {
+    return { created: false, message: "Tickets need a valid server member." };
+  }
+
   if (!settings.ticketsEnabled || !settings.ticketsIntakeChannelId) {
-    return "Tickets are disabled in this server.";
+    return { created: false, message: "Tickets are disabled in this server." };
   }
 
-  const guild = interaction.guild;
-  const existing = getTicketByUser(guild.id, interaction.user.id);
-  if (existing) {
-    const existingChannel = guild.channels.cache.get(existing.channelId);
-    if (existingChannel) {
-      return `You already have an open ticket in <#${existing.channelId}>.`;
+  const requestKey = `${guild.id}:${user.id}`;
+  if (pendingTicketOpeners.has(requestKey)) {
+    return { created: false, message: "This ticket is already being created. Please wait a moment." };
+  }
+
+  pendingTicketOpeners.add(requestKey);
+  try {
+    const existing = getTicketByUser(guild.id, user.id);
+    if (existing) {
+      const existingChannel = guild.channels.cache.get(existing.channelId);
+      if (existingChannel) {
+        return {
+          created: false,
+          existingChannelId: existing.channelId,
+          message: `An open ticket already exists in <#${existing.channelId}>.`,
+        };
+      }
+
+      closeTicketForUser(guild.id, user.id);
     }
-  }
 
-  const intakeChannel = guild.channels.cache.get(settings.ticketsIntakeChannelId);
-  if (!intakeChannel) {
-    return "The ticket intake channel is no longer available.";
-  }
+    const intakeChannel = guild.channels.cache.get(settings.ticketsIntakeChannelId);
+    if (!intakeChannel) {
+      return { created: false, message: "The ticket intake channel is no longer available." };
+    }
 
-  if (!botMember || !botMember.permissions.has(PermissionFlagsBits.ManageChannels)) {
-    return "Blueprint needs Manage Channels permission to open tickets.";
-  }
+    if (!botMember || !botMember.permissions.has(PermissionFlagsBits.ManageChannels)) {
+      return { created: false, message: "Blueprint needs Manage Channels permission to open tickets." };
+    }
 
-  const everyoneRoleId = guild.roles.everyone.id;
-  const permissionOverwrites = [
-    {
-      id: everyoneRoleId,
-      deny: [PermissionFlagsBits.ViewChannel],
-    },
-    {
-      id: interaction.user.id,
-      allow: [
-        PermissionFlagsBits.ViewChannel,
-        PermissionFlagsBits.SendMessages,
-        PermissionFlagsBits.ReadMessageHistory,
-      ],
-    },
-    {
-      id: botMember.id,
-      allow: [
-        PermissionFlagsBits.ViewChannel,
-        PermissionFlagsBits.SendMessages,
-        PermissionFlagsBits.ReadMessageHistory,
-        PermissionFlagsBits.ManageChannels,
-      ],
-    },
-  ];
+    const permissionOverwrites = [
+      {
+        id: guild.roles.everyone.id,
+        deny: [PermissionFlagsBits.ViewChannel],
+      },
+      {
+        id: user.id,
+        allow: [
+          PermissionFlagsBits.ViewChannel,
+          PermissionFlagsBits.SendMessages,
+          PermissionFlagsBits.ReadMessageHistory,
+        ],
+      },
+      {
+        id: botMember.id,
+        allow: [
+          PermissionFlagsBits.ViewChannel,
+          PermissionFlagsBits.SendMessages,
+          PermissionFlagsBits.ReadMessageHistory,
+          PermissionFlagsBits.ManageChannels,
+        ],
+      },
+    ];
 
-  if (settings.ticketsSupportRoleId) {
-    permissionOverwrites.push({
-      id: settings.ticketsSupportRoleId,
-      allow: [
-        PermissionFlagsBits.ViewChannel,
-        PermissionFlagsBits.SendMessages,
-        PermissionFlagsBits.ReadMessageHistory,
-      ],
+    if (settings.ticketsSupportRoleId) {
+      permissionOverwrites.push({
+        id: settings.ticketsSupportRoleId,
+        allow: [
+          PermissionFlagsBits.ViewChannel,
+          PermissionFlagsBits.SendMessages,
+          PermissionFlagsBits.ReadMessageHistory,
+        ],
+      });
+    }
+
+    const displayName = user.username || user.tag || user.id;
+    const displayTag = user.tag || displayName;
+    const ticketChannel = await guild.channels.create({
+      name: `ticket-${sanitizeTicketName(displayName)}`,
+      parent: intakeChannel.parentId || null,
+      permissionOverwrites,
+      topic: `Blueprint ticket for ${displayTag} (${user.id})`,
+      type: ChannelType.GuildText,
     });
+
+    upsertTicket(guild.id, user.id, ticketChannel.id);
+
+    await ticketChannel.send({
+      ...buildCloseTicketPayload(user.id),
+      allowedMentions: settings.ticketsSupportRoleId
+        ? { parse: [], roles: [settings.ticketsSupportRoleId], users: [user.id] }
+        : { parse: [], users: [user.id] },
+      content: [
+        settings.ticketsSupportRoleId ? `<@&${settings.ticketsSupportRoleId}>` : "",
+        `Support ticket opened for <@${user.id}>.`,
+        "A team member will be with you shortly. Use the button below when the issue is resolved.",
+        context ? `\nContext: ${clampText(context, 1200)}` : "",
+      ]
+        .filter(Boolean)
+        .join("\n"),
+    });
+
+    return {
+      created: true,
+      channel: ticketChannel,
+      message: `Ticket created: <#${ticketChannel.id}>.`,
+    };
+  } catch (error) {
+    return {
+      created: false,
+      error,
+      message: "Blueprint could not create the ticket. Please check its channel permissions and try again.",
+    };
+  } finally {
+    pendingTicketOpeners.delete(requestKey);
   }
-
-  const channelName = `ticket-${sanitizeTicketName(interaction.user.username)}`;
-  const ticketChannel = await guild.channels.create({
-    name: channelName,
-    parent: intakeChannel.parentId || null,
-    permissionOverwrites,
-    topic: `Blueprint ticket for ${interaction.user.tag} (${interaction.user.id})`,
-    type: ChannelType.GuildText,
-  });
-
-  upsertTicket(guild.id, interaction.user.id, ticketChannel.id);
-
-  await ticketChannel.send({
-    ...buildCloseTicketPayload(interaction.user.id),
-    allowedMentions: settings.ticketsSupportRoleId
-      ? { parse: [], roles: [settings.ticketsSupportRoleId], users: [interaction.user.id] }
-      : { parse: [], users: [interaction.user.id] },
-    content: [
-      settings.ticketsSupportRoleId ? `<@&${settings.ticketsSupportRoleId}>` : "",
-      `Support ticket opened for <@${interaction.user.id}>.`,
-      "A team member will be with you shortly. Use the button below when the issue is resolved.",
-    ]
-      .filter(Boolean)
-      .join("\n"),
-  });
-
-  return `Ticket created: <#${ticketChannel.id}>.`;
 }
 
 async function closeTicket(interaction, settings) {
@@ -206,8 +243,13 @@ async function closeTicket(interaction, settings) {
     }).catch(() => null);
   }
 
+  try {
+    await interaction.channel.delete("Blueprint ticket closed");
+  } catch {
+    return "Blueprint could not close this ticket. Please check its channel permissions and try again.";
+  }
+
   closeTicketForChannel(interaction.guild.id, interaction.channel.id);
-  await interaction.channel.delete("Blueprint ticket closed").catch(() => null);
   return "";
 }
 
@@ -270,6 +312,7 @@ module.exports = {
   OPEN_TICKET_CUSTOM_ID,
   buildTicketPanelPayload,
   closeTicket,
+  createTicketForUser,
   openTicket,
   sanitizeTicketName,
   syncTicketPanel,

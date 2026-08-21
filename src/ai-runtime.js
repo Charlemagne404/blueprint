@@ -209,8 +209,36 @@ function getAiAccessRequirementMessage(result, runtimeConfig, productName = "Blu
   }
 
   const body = payload.body && typeof payload.body === "object" ? payload.body : {};
+  const access = body.access && typeof body.access === "object" ? body.access : {};
+  const aiAccess = access.ai && typeof access.ai === "object" ? access.ai : null;
   const user = body.user && typeof body.user === "object" ? body.user : {};
   const flags = body.flags && typeof body.flags === "object" ? body.flags : {};
+
+  if (aiAccess) {
+    if (aiAccess.allowed) {
+      return null;
+    }
+
+    if (
+      Array.isArray(aiAccess.requirements) &&
+      aiAccess.requirements.includes("link_discord")
+    ) {
+      const linkParts = [];
+      if (runtimeConfig.authLoginPopupUrl) {
+        linkParts.push(`Sign in: ${runtimeConfig.authLoginPopupUrl}`);
+      }
+      if (runtimeConfig.continentalIdDashboardUrl) {
+        linkParts.push(`Dashboard: ${runtimeConfig.continentalIdDashboardUrl}`);
+      }
+
+      const suffix = linkParts.length > 0 ? ` ${linkParts.join(" • ")}` : "";
+      return `⛔ You must sign in to Continental ID and link your Discord account before you can use ${productName}.${suffix}`.trim();
+    }
+
+    if (aiAccess.reasonCode === "auth/authorization-denied") {
+      return `⛔ Your Continental ID account is not allowed to use ${productName}.`;
+    }
+  }
 
   if (!body.linked || !user.discordLinked) {
     const linkParts = [];

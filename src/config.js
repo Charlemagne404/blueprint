@@ -55,6 +55,10 @@ const config = {
   aiUseCache: parseBoolean(process.env.AI_USE_CACHE, true),
   aiUseContext: parseBoolean(process.env.AI_USE_CONTEXT, true),
   authApiBaseUrl,
+  authRequestTimeoutSeconds: parseInteger(process.env.AUTH_REQUEST_TIMEOUT_SECONDS, 10, {
+    minimum: 2,
+    maximum: 60,
+  }),
   authLoginPopupUrl:
     process.env.AUTH_LOGIN_POPUP_URL || DEFAULT_AUTH_LOGIN_POPUP_URL,
   authTrustedLoginOrigins: String(

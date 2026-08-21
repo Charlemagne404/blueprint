@@ -13,6 +13,7 @@
     "node": ">=20"
   },
   "dependencies": {
+    "@continental/id-client": "file:../continental-id-client",
     "better-sqlite3": "^12.1.1",
     "discord.js": "^14.19.3",
     "dotenv": "^16.6.1",
