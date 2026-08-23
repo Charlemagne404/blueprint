@@ -35,6 +35,7 @@ These are useful signals from the current checkout, but they do not prove produc
 - A fresh checkout at the release commit completed `npm ci`, syntax checks, production configuration-shape validation, `npm audit`, and all 51 automated tests.
 - CI run [32667495637](https://github.com/Charlemagne404/blueprint/actions/runs/32667495637) passed install, syntax, tests, audit, and production configuration-shape validation with the current action versions.
 - The live systemd service restarted in `NODE_ENV=production`; Discord connected, 9 slash commands registered, `/healthz` and `/readyz` returned 200, and the service remained bound to `127.0.0.1:3000` behind HTTPS.
+- The deployed public pages were reviewed: `/`, `/privacy`, `/terms`, `/robots.txt`, `/sitemap.xml`, both security.txt paths, and `/site.webmanifest` returned 200; an unknown path returned the custom 404; HTTPS security headers were present.
 - The standalone repository does not contain the external Continental ID auth-popup assets; deployments must provide the Dashboard login assets alongside Blueprint or use the hosted login popup.
 
 ## P0 — must be complete before public launch
@@ -157,7 +158,7 @@ For every module below, verify all of the following where applicable:
 - [ ] Test common browsers and the hosted login popup on supported desktop and mobile platforms.
 - [ ] Verify loading, disabled, retry, timeout, stale-session, unauthorized, missing-server, missing-channel, and save-error states are clear.
 - [ ] Verify no user-facing copy claims support for behavior that is disabled, external, experimental, or only partially implemented.
-- [ ] Review public pages, metadata, favicon, manifest, 404, privacy, terms, security.txt, robots.txt, and sitemap on the deployed host.
+- [x] Review public pages, metadata, favicon, manifest, 404, privacy, terms, security.txt, robots.txt, and sitemap on the deployed host.
 - [ ] Perform a final visual review against the intended product identity and capture screenshots for the release record.
 
 ### 8. Support, abuse prevention, and incident response
