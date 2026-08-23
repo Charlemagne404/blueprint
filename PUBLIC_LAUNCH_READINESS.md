@@ -31,9 +31,9 @@ These are useful signals from the current checkout, but they do not prove produc
 
 ### Repository-level evidence captured on 2026-08-23
 
-- Release-readiness hardening was committed as `ab41848` and pushed to `main`.
-- A fresh checkout at that commit completed `npm ci`, syntax checks, production configuration-shape validation, `npm audit`, and all 51 automated tests.
-- CI run [32667408854](https://github.com/Charlemagne404/blueprint/actions/runs/32667408854) passed install, syntax, tests, audit, and production configuration-shape validation.
+- Release-readiness hardening was committed as `bbfb2c4` and tagged [`v1.0.1`](https://github.com/Charlemagne404/blueprint/releases/tag/v1.0.1) on `main`.
+- A fresh checkout at the release commit completed `npm ci`, syntax checks, production configuration-shape validation, `npm audit`, and all 51 automated tests.
+- CI run [32667495637](https://github.com/Charlemagne404/blueprint/actions/runs/32667495637) passed install, syntax, tests, audit, and production configuration-shape validation with the current action versions.
 - The live systemd service restarted in `NODE_ENV=production`; Discord connected, 9 slash commands registered, `/healthz` and `/readyz` returned 200, and the service remained bound to `127.0.0.1:3000` behind HTTPS.
 - The standalone repository does not contain the external Continental ID auth-popup assets; deployments must provide the Dashboard login assets alongside Blueprint or use the hosted login popup.
 
@@ -41,9 +41,9 @@ These are useful signals from the current checkout, but they do not prove produc
 
 ### 1. Release provenance and reproducibility
 
-- [ ] Review every changed and untracked file in the release commit; confirm no unrelated work, credentials, local databases, or temporary assets are included.
-- [ ] Commit the release to a named release branch or tag and record the exact commit SHA.
-- [ ] Build and test from a fresh checkout at that SHA.
+- [x] Review every changed and untracked file in the release commit; confirm no unrelated work, credentials, local databases, or temporary assets are included. Runtime databases, logs, backups, and the pre-existing local binding edit were excluded from the release commit.
+- [x] Commit the release to a named release branch or tag and record the exact commit SHA (`v1.0.1` → `bbfb2c4f329dc80d6be717d74656d160970d4c64`).
+- [x] Build and test from a fresh checkout at that SHA.
 - [x] Make dependency installation reproducible outside the developer's machine. The local sibling dependency was replaced with a pinned public commit archive in `package.json` and `package-lock.json`.
 - [x] Confirm the lockfile matches `package.json` and that the deployment uses `npm ci` or an equivalent immutable install. Fresh-checkout and CI installs pass.
 - [x] Pin and document the production Node.js version (`22.23.2` in `.nvmrc`; the package still declares Node 20 as its minimum).
