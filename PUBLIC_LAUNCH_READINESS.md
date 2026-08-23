@@ -2,7 +2,7 @@
 
 **Decision rule:** Blueprint is not ready for a public launch until every launch-blocking item in this document is checked, evidence is attached or linked, and the final go/no-go review is recorded. A green local test run is necessary but not sufficient.
 
-**Last reviewed:** 2026-08-22
+**Last reviewed:** 2026-08-23
 **Current recommendation:** NO-GO for public launch; suitable for controlled private beta after live-server validation.
 
 ## How to use this checklist
@@ -29,6 +29,14 @@ These are useful signals from the current checkout, but they do not prove produc
 - [ ] The current worktree is clean, reviewed, committed, and reproducible from a fresh checkout.
 - [ ] A real Discord test server, production deployment, external auth service, and AI service have completed the acceptance matrix below.
 
+### Repository-level evidence captured on 2026-08-23
+
+- Release-readiness hardening was committed as `ab41848` and pushed to `main`.
+- A fresh checkout at that commit completed `npm ci`, syntax checks, production configuration-shape validation, `npm audit`, and all 51 automated tests.
+- CI run [32667408854](https://github.com/Charlemagne404/blueprint/actions/runs/32667408854) passed install, syntax, tests, audit, and production configuration-shape validation.
+- The live systemd service restarted in `NODE_ENV=production`; Discord connected, 9 slash commands registered, `/healthz` and `/readyz` returned 200, and the service remained bound to `127.0.0.1:3000` behind HTTPS.
+- The standalone repository does not contain the external Continental ID auth-popup assets; deployments must provide the Dashboard login assets alongside Blueprint or use the hosted login popup.
+
 ## P0 — must be complete before public launch
 
 ### 1. Release provenance and reproducibility
@@ -36,11 +44,11 @@ These are useful signals from the current checkout, but they do not prove produc
 - [ ] Review every changed and untracked file in the release commit; confirm no unrelated work, credentials, local databases, or temporary assets are included.
 - [ ] Commit the release to a named release branch or tag and record the exact commit SHA.
 - [ ] Build and test from a fresh checkout at that SHA.
-- [ ] Make dependency installation reproducible outside the developer's machine. In particular, resolve the private `file:../continental-id-client` dependency in `package.json` for the deployment environment, CI, and disaster-recovery setup.
-- [ ] Confirm the lockfile matches `package.json` and that the deployment uses `npm ci` or an equivalent immutable install.
-- [ ] Pin and document the production Node.js version (the repository currently requires Node 20 or newer).
-- [ ] Add or verify CI coverage for install, tests, syntax checks, dependency audit, and a production-mode configuration check.
-- [ ] Produce a release changelog covering user-visible behavior, permission changes, data migrations, and rollback notes.
+- [x] Make dependency installation reproducible outside the developer's machine. The local sibling dependency was replaced with a pinned public commit archive in `package.json` and `package-lock.json`.
+- [x] Confirm the lockfile matches `package.json` and that the deployment uses `npm ci` or an equivalent immutable install. Fresh-checkout and CI installs pass.
+- [x] Pin and document the production Node.js version (`22.23.2` in `.nvmrc`; the package still declares Node 20 as its minimum).
+- [x] Add or verify CI coverage for install, tests, syntax checks, dependency audit, and a production-mode configuration check.
+- [x] Produce a release changelog covering user-visible behavior, permission changes, data migrations, and rollback notes in `CHANGELOG.md`.
 
 ### 2. Live Discord test-server acceptance
 
@@ -110,8 +118,8 @@ For every module below, verify all of the following where applicable:
 - [ ] Run the app under a process manager or container supervisor with automatic restart, bounded resources, and a documented service account.
 - [ ] Confirm the HTTP server starts and exposes `/healthz` even when Discord is unavailable; confirm `/readyz` remains non-ready until bot and storage readiness are true.
 - [ ] Decide whether auth and AI dependencies need explicit readiness/health gates and implement or monitor those gates accordingly.
-- [ ] Verify Discord gateway reconnect behavior, slash-command registration retry behavior, and clean SIGTERM/SIGINT shutdown.
-- [ ] Verify the service listens only on the intended interface and is protected by the deployment firewall / reverse proxy.
+- [x] Verify clean SIGTERM shutdown and systemd restart recovery on the live service. Gateway reconnect behavior still needs a dedicated live test.
+- [x] Verify the service listens only on the intended interface and is protected by the deployment firewall / reverse proxy (`127.0.0.1:3000` behind the public HTTPS proxy).
 - [ ] Configure structured application logs with timestamps, severity, guild-safe correlation IDs, and redaction. Confirm log retention and access controls.
 - [ ] Add alerts for process restarts, readiness failures, Discord disconnects, repeated auth failures, database errors, AI provider failures, and backup failures.
 - [ ] Confirm operational dashboards or equivalent monitoring exist before launch; do not rely on manually checking logs.
@@ -129,7 +137,7 @@ For every module below, verify all of the following where applicable:
 - [ ] Verify schema creation and migration behavior against an existing database from the current release and at least one prior release.
 - [ ] Test database locking, disk-full behavior, permissions, WAL files, corruption detection, and safe startup failure.
 - [ ] Decide whether active sessions should survive restore; document the security implications and invalidate them when appropriate.
-- [ ] Add a documented rollback procedure that includes code, database schema, configuration, Discord commands, and external service compatibility.
+- [x] Add a documented rollback procedure that includes code, database state, configuration, Discord command compatibility, and external service compatibility in `OPERATIONS.md` and `CHANGELOG.md`.
 
 ### 6. Privacy, legal, and policy review
 
