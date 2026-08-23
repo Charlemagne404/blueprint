@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out Blueprint
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Check JavaScript syntax
+        run: npm run check:syntax
+
+      - name: Run tests
+        run: npm test
+
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high
+
+      - name: Validate production configuration shape
+        run: npm run check:production-config
+        env:
+          NODE_ENV: production
+          BASE_URL: https://blueprint.example.test
+          AUTH_API_BASE_URL: https://auth.example.test
+          AUTH_LOGIN_POPUP_URL: https://blueprint.example.test/auth-popup/popup.html
+          AUTH_TRUSTED_LOGIN_ORIGINS: https://blueprint.example.test
+          AI_SERVER_BASE_URL: https://ai.example.test
+          DISCORD_TOKEN: ci-placeholder-token
+          DISCORD_CLIENT_ID: "123456789012345678"
+          DISCORD_SESSION_SECRET: ci-placeholder-session-secret-at-least-32-chars

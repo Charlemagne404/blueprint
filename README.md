@@ -95,20 +95,21 @@ The AI module uses the same Continental identity linkage for Discord-side access
 2. Enable the `Server Members Intent` for the bot.
 3. Make sure the Dashboard auth backend is running and its Discord provider is configured.
 4. Allow the Blueprint origin in the Dashboard auth backend redirect settings.
-5. Install dependencies:
+5. Use the pinned production runtime from `.nvmrc` (Node.js `22.23.2`) or a compatible Node.js 22 release.
+6. Install the locked dependencies:
 
 ```bash
-npm install
+npm ci
 ```
 
-6. Set the required environment variables.
-7. Start the app:
+7. Set the required environment variables.
+8. Start the app:
 
 ```bash
 npm start
 ```
 
-8. Open:
+9. Open:
 
 ```text
 http://localhost:3000
@@ -137,6 +138,9 @@ DATA_DIR=/var/lib/blueprint
 `DISCORD_SESSION_SECRET` should be a unique random value of at least 32 characters. When
 `NODE_ENV=production`, startup fails if required URLs are invalid, `BASE_URL` is not HTTPS,
 or the session secret is too short.
+
+The Continental ID client is installed from a pinned GitHub commit archive, so `npm ci`
+works from a clean checkout without requiring a sibling `../continental-id-client` directory.
 
 ## Optional Environment Variables
 
@@ -201,6 +205,18 @@ Run the current automated tests with:
 ```bash
 npm test
 ```
+
+Run the repository checks used by CI with:
+
+```bash
+npm run check:syntax
+npm audit --omit=dev --audit-level=high
+npm run check:production-config
+```
+
+The production configuration check must run with the real deployment environment loaded and
+`NODE_ENV=production`; it validates configuration shape and never prints secret values. See
+[OPERATIONS.md](OPERATIONS.md) for the deployment, restart, backup, and rollback runbook.
 
 When shipping module work, also verify:
 
