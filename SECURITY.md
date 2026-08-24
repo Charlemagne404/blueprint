@@ -18,3 +18,7 @@ For live deployments, the canonical machine-readable reporting endpoint is:
 - `/.well-known/security.txt`
 
 Because this project may be deployed in different environments, the exact contact path is published by the running app rather than hardcoded only in the repository.
+
+Operational incident handling is documented in [INCIDENT_RESPONSE.md](INCIDENT_RESPONSE.md).
+Do not include access tokens, session cookies, API keys, AI prompts, private messages, or full
+Discord message contents in a report.

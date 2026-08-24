@@ -28,6 +28,27 @@ test("cooldown store does not block zero-second cooldown rules", () => {
   assert.equal(store.consume("guild:rule", 0), true);
 });
 
+test("cooldown store can restore and persist a cooldown across processes", () => {
+  let now = 1_000;
+  let persistedExpiry = 0;
+  const first = createCooldownStore({
+    now: () => now,
+    setExpiry: (_key, expiry) => { persistedExpiry = expiry; },
+  });
+
+  assert.equal(first.consume("guild:rule", 30), true);
+  assert.equal(persistedExpiry, 31_000);
+
+  const second = createCooldownStore({
+    getExpiry: () => persistedExpiry,
+    now: () => now,
+  });
+  assert.equal(second.consume("guild:rule", 30), false);
+
+  now = 31_000;
+  assert.equal(second.consume("guild:rule", 30), true);
+});
+
 test("anti-raid lockdown slowmode never lowers an existing channel slowmode", () => {
   assert.equal(getLockdownSlowmodeSeconds(0), DEFAULT_ANTI_RAID_SLOWMODE_SECONDS);
   assert.equal(getLockdownSlowmodeSeconds(3), DEFAULT_ANTI_RAID_SLOWMODE_SECONDS);

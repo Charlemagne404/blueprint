@@ -1,0 +1,30 @@
+[Unit]
+Description=Blueprint Discord bot and control center
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=blueprint
+Group=blueprint
+WorkingDirectory=/opt/blueprint
+EnvironmentFile=/etc/blueprint/blueprint.env
+ExecStart=/usr/bin/node /opt/blueprint/src/index.js
+Restart=always
+RestartSec=5
+TimeoutStopSec=30
+MemoryMax=512M
+TasksMax=256
+LimitNOFILE=8192
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ReadWritePaths=/var/lib/blueprint
+
+[Install]
+WantedBy=multi-user.target

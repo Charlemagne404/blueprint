@@ -34,7 +34,10 @@ const {
 } = require("./auth-contract");
 const continentalIdBrowserGlobalPath = require.resolve("@continental/id-client/browser-global");
 const { createSessionStore } = require("./session-store");
+const { readResponseText } = require("./http-client");
 const logger = require("./logger");
+const { createMetrics, formatPrometheus } = require("./metrics");
+const { createRateLimiter } = require("./rate-limit");
 const { normalizeReturnTo, tokensMatch } = require("./security-utils");
 const {
   renderAuthComplete,
@@ -152,6 +155,7 @@ const { normalizeModmailSettings, validateModmailSettings } = require("./modules
 const {
   canStaffReplyToModmail,
   getModmailReferenceId,
+  getModmailInboundContent,
   getModmailReplyContent,
 } = require("./modules/modmail-runtime");
 const {
@@ -169,9 +173,12 @@ const {
   stripBotMention,
 } = require("./ai-runtime");
 const {
+  clearAntiRaidLockdownState,
   clearCountdownAlertLastSentOn,
   checkStorageHealth,
   deleteStarboardEntry,
+  getAutomationCooldown,
+  getAntiRaidLockdownState,
   getCountdownAlertLastSentOn,
   getNextSuggestionNumber,
   getGuildSettings,
@@ -180,6 +187,8 @@ const {
   saveGuildSettings,
   saveModmailMessageMapping,
   setCountdownAlertLastSentOn,
+  setAutomationCooldown,
+  setAntiRaidLockdownState,
   upsertStarboardEntry,
 } = require("./storage");
 const {
@@ -209,7 +218,27 @@ const sessionStore = createSessionStore({
   dataDir: config.dataDir,
   ttlMs: SESSION_COOKIE_MAX_AGE_MS,
 });
-const automationCooldowns = createCooldownStore();
+const metrics = createMetrics();
+const authRateLimiter = createRateLimiter({
+  limit: config.authRateLimitMaxRequests,
+  onReject: () => metrics.increment("rate_limit_rejections_total"),
+  windowMs: config.authRateLimitWindowSeconds * 1000,
+});
+const dashboardWriteRateLimiter = createRateLimiter({
+  keyGenerator: (request) =>
+    `${request.ip || "anonymous"}:${request.session.user?.id || "anonymous"}:${request.params.guildId || "unknown"}`,
+  limit: config.dashboardWriteRateLimitMaxRequests,
+  onReject: () => metrics.increment("rate_limit_rejections_total"),
+  windowMs: config.dashboardWriteRateLimitWindowSeconds * 1000,
+});
+const automationCooldowns = createCooldownStore({
+  getExpiry: getAutomationCooldown,
+  onBlocked: () => metrics.increment("automation_cooldown_drops_total"),
+  setExpiry: setAutomationCooldown,
+});
+const aiCooldowns = createCooldownStore({
+  onBlocked: () => metrics.increment("ai_cooldown_drops_total"),
+});
 
 const commands = [
   new SlashCommandBuilder()
@@ -320,6 +349,18 @@ app.use(
     },
   }),
 );
+app.use((request, response, next) => {
+  const startedAt = Date.now();
+  const correlationId = crypto.randomUUID();
+  response.locals.correlationId = correlationId;
+  response.set("X-Correlation-Id", correlationId);
+  response.once("finish", () => {
+    metrics.increment("http_requests_total");
+    metrics.increment(`http_responses_${Math.floor(response.statusCode / 100)}xx_total`);
+    metrics.observe("http_request", Date.now() - startedAt);
+  });
+  next();
+});
 app.use(express.static(path.join(process.cwd(), "public")));
 app.use("/images", express.static(path.join(process.cwd(), "images")));
 app.get("/vendor/continental-id-client.js", (request, response) => {
@@ -431,6 +472,13 @@ app.get("/readyz", (request, response) => {
   });
 });
 
+app.get("/metrics", requireMetricsAccess, (request, response) => {
+  response
+    .type("text/plain; version=0.0.4")
+    .set("Cache-Control", "no-store")
+    .send(formatPrometheus(metrics.snapshot()));
+});
+
 app.get("/robots.txt", (request, response) => {
   response.type("text/plain").send([
     "User-agent: *",
@@ -499,7 +547,7 @@ app.get("/auth/complete", (request, response) => {
   );
 });
 
-app.post("/auth/session", requireCsrfToken, async (request, response, next) => {
+app.post("/auth/session", authRateLimiter.middleware, requireCsrfToken, async (request, response, next) => {
   const correlationId = crypto.randomUUID();
   try {
     const accessToken = normalizeToken(request.body.accessToken);
@@ -549,7 +597,12 @@ app.post("/auth/session", requireCsrfToken, async (request, response, next) => {
   }
 });
 
-app.post("/auth/link/discord/start", requireAuthJson, requireCsrfToken, async (request, response, next) => {
+app.post(
+  "/auth/link/discord/start",
+  authRateLimiter.middleware,
+  requireAuthJson,
+  requireCsrfToken,
+  async (request, response, next) => {
   try {
     const payload = await fetchAuthJson("/api/auth/oauth/discord/link-start", {
       accessToken: request.session.accessToken,
@@ -573,7 +626,8 @@ app.post("/auth/link/discord/start", requireAuthJson, requireCsrfToken, async (r
   } catch (error) {
     next(error);
   }
-});
+  },
+);
 
 app.get("/logout", (request, response) => {
   response.redirect("/");
@@ -656,7 +710,12 @@ app.get("/dashboard/:guildId", requireAuthPage, async (request, response, next) 
   }
 });
 
-app.post("/dashboard/:guildId", requireAuthPage, requireCsrfToken, async (request, response, next) => {
+app.post(
+  "/dashboard/:guildId",
+  dashboardWriteRateLimiter.middleware,
+  requireAuthPage,
+  requireCsrfToken,
+  async (request, response, next) => {
   try {
     const guild = await getManagedGuild(
       request.session.user.discordUserId,
@@ -774,9 +833,15 @@ app.post("/dashboard/:guildId", requireAuthPage, requireCsrfToken, async (reques
   } catch (error) {
     next(error);
   }
-});
+  },
+);
 
-app.post("/dashboard/:guildId/countdown/remove", requireAuthPage, requireCsrfToken, async (request, response, next) => {
+app.post(
+  "/dashboard/:guildId/countdown/remove",
+  dashboardWriteRateLimiter.middleware,
+  requireAuthPage,
+  requireCsrfToken,
+  async (request, response, next) => {
   try {
     const guild = await getManagedGuild(
       request.session.user.discordUserId,
@@ -799,7 +864,8 @@ app.post("/dashboard/:guildId/countdown/remove", requireAuthPage, requireCsrfTok
   } catch (error) {
     next(error);
   }
-});
+  },
+);
 
 app.use((request, response) => {
   response.status(404).send(
@@ -811,7 +877,12 @@ app.use((request, response) => {
 });
 
 app.use((error, request, response, next) => {
-  const correlationId = error.authCorrelationId || crypto.randomUUID();
+  const correlationId =
+    error.authCorrelationId || response.locals.correlationId || crypto.randomUUID();
+  metrics.increment("request_failures_total");
+  if (request.path.startsWith("/auth/")) {
+    metrics.increment("auth_failures_total");
+  }
   const authCode =
     error.code ||
     (typeof error.statusCode === "number" ? mapAuthErrorCode(error.statusCode) : null);
@@ -937,6 +1008,9 @@ client.once(Events.ClientReady, (readyClient) => {
   logger.info("discord_ready", { username: readyClient.user.tag });
   void registerCommandsWithRetry();
   startCountdownAlertScheduler();
+  restoreActiveAntiRaidLockdowns().catch((error) => {
+    logger.error("anti_raid_restore_failed", {}, error);
+  });
   syncTicketPanelsForClient().catch((error) => {
     logger.error("ticket_panel_sync_failed", {}, error);
   });
@@ -1117,9 +1191,13 @@ client.on(Events.MessageReactionRemove, async (reaction, user) => {
 
 async function runIsolatedTask(label, task, fallbackValue = undefined) {
   const correlationId = crypto.randomUUID();
+  const metricLabel = label.replace(/\s+for guild\s+\d{16,20}$/i, "");
+  metrics.increment(`module_${metricLabel}_attempts_total`);
   try {
     return await task();
   } catch (error) {
+    metrics.increment("isolated_task_failures_total");
+    metrics.increment(`module_${metricLabel}_failures_total`);
     logger.error("isolated_task_failed", { correlationId, label }, error);
     return fallbackValue;
   }
@@ -1539,6 +1617,19 @@ async function handleAiCommand(interaction, settings) {
     return;
   }
 
+  const aiSessionId = buildAiSessionId(
+    interaction.guildId,
+    interaction.channelId,
+    interaction.user.id,
+  );
+  if (!aiCooldowns.consume(aiSessionId, config.aiRequestCooldownSeconds)) {
+    await interaction.reply({
+      content: "Please wait a moment before sending another AI request.",
+      ephemeral: true,
+    });
+    return;
+  }
+
   const accessError = await getAiAccessError(interaction.user.id);
   if (accessError) {
     await interaction.reply({
@@ -1553,7 +1644,7 @@ async function handleAiCommand(interaction, settings) {
     persona: settings.aiToolsPersona,
     question: normalizeText(interaction.options.getString("question", true), "", 1500),
     runtimeConfig: config,
-    sessionId: buildAiSessionId(interaction.guildId, interaction.channelId, interaction.user.id),
+    sessionId: aiSessionId,
     userId: interaction.user.id,
     username: interaction.user.tag,
   });
@@ -1675,6 +1766,15 @@ async function handleAiToolsMessage(message, settings) {
     return;
   }
 
+  const aiSessionId = buildAiSessionId(
+    message.guild.id,
+    message.channelId,
+    message.author.id,
+  );
+  if (!aiCooldowns.consume(aiSessionId, config.aiRequestCooldownSeconds)) {
+    return;
+  }
+
   const accessError = await getAiAccessError(message.author.id);
   if (accessError) {
     await message.reply({
@@ -1689,7 +1789,7 @@ async function handleAiToolsMessage(message, settings) {
     persona: settings.aiToolsPersona,
     question,
     runtimeConfig: config,
-    sessionId: buildAiSessionId(message.guild.id, message.channelId, message.author.id),
+    sessionId: aiSessionId,
     userId: message.author.id,
     username: message.author.tag,
   });
@@ -1741,7 +1841,7 @@ async function handleModmailInbound(message) {
           settings.modmailStaffRoleId ? `<@&${settings.modmailStaffRoleId}>` : "",
           `📩 **Modmail** from ${message.author.tag} (${message.author.id})`,
           "",
-          normalizeText(message.content, "(no text content)", 1800),
+          getModmailInboundContent(message),
         ]
           .filter(Boolean)
           .join("\n"),
@@ -1898,6 +1998,31 @@ async function syncStarboardReaction(reaction, user) {
 
 const raidTracker = new Map();
 
+function createAntiRaidState(persistedState = {}) {
+  const previousSlowmodes = new Map(
+    (persistedState.previousSlowmodes || [])
+      .filter((entry) => entry && entry.channelId)
+      .map((entry) => [entry.channelId, {
+        applied: Math.max(0, Number(entry.applied) || 0),
+        previous: Math.max(0, Number(entry.previous) || 0),
+      }]),
+  );
+
+  return {
+    joinTimestamps: [],
+    lockedUntil: Math.max(0, Number(persistedState.lockedUntil) || 0),
+    previousSlowmodes,
+    unlockTimer: null,
+  };
+}
+
+function persistAntiRaidState(guildId, state) {
+  setAntiRaidLockdownState(guildId, {
+    lockedUntil: state.lockedUntil,
+    previousSlowmodes: state.previousSlowmodes,
+  });
+}
+
 async function evaluateAntiRaid(guild, settings) {
   if (!settings.antiRaidEnabled) {
     return;
@@ -1905,15 +2030,17 @@ async function evaluateAntiRaid(guild, settings) {
 
   const now = Date.now();
   const windowMs = settings.antiRaidWindowSeconds * 1000;
-  const state =
-    raidTracker.get(guild.id) || {
-      joinTimestamps: [],
-      lockedUntil: 0,
-      previousSlowmodes: new Map(),
-      unlockTimer: null,
-    };
+  const state = raidTracker.get(guild.id) || createAntiRaidState(
+    getAntiRaidLockdownState(guild.id),
+  );
   state.joinTimestamps = [...state.joinTimestamps, now].filter((stamp) => now - stamp <= windowMs);
   raidTracker.set(guild.id, state);
+
+  if (state.lockedUntil > now && state.joinTimestamps.length < settings.antiRaidJoinThreshold) {
+    scheduleAntiRaidUnlock(guild.id, state);
+    persistAntiRaidState(guild.id, state);
+    return;
+  }
 
   if (state.joinTimestamps.length < settings.antiRaidJoinThreshold) {
     return;
@@ -1923,6 +2050,7 @@ async function evaluateAntiRaid(guild, settings) {
   const lockdownAlreadyActive = now < state.lockedUntil;
   state.lockedUntil = lockdownEndsAt;
   raidTracker.set(guild.id, state);
+  persistAntiRaidState(guild.id, state);
   scheduleAntiRaidUnlock(guild.id, state);
 
   if (lockdownAlreadyActive) {
@@ -1960,10 +2088,13 @@ async function evaluateAntiRaid(guild, settings) {
         applied: nextSlowmode,
         previous: Math.max(0, channel.rateLimitPerUser || 0),
       });
+      persistAntiRaidState(guild.id, state);
     }
 
     await channel.setRateLimitPerUser(nextSlowmode, "Blueprint anti-raid lockdown").catch(() => null);
   }
+
+  persistAntiRaidState(guild.id, state);
 }
 
 function scheduleAntiRaidUnlock(guildId, state) {
@@ -1977,10 +2108,16 @@ function scheduleAntiRaidUnlock(guildId, state) {
 }
 
 async function releaseAntiRaidLockdown(guildId, { force = false } = {}) {
-  const state = raidTracker.get(guildId);
+  const state = raidTracker.get(guildId) || createAntiRaidState(
+    getAntiRaidLockdownState(guildId),
+  );
   if (!state) {
     return;
   }
+  if (!raidTracker.has(guildId) && state.lockedUntil === 0 && state.previousSlowmodes.size === 0) {
+    return;
+  }
+  raidTracker.set(guildId, state);
 
   state.unlockTimer = null;
   if (!force && state.lockedUntil > Date.now()) {
@@ -1993,6 +2130,7 @@ async function releaseAntiRaidLockdown(guildId, { force = false } = {}) {
     state.previousSlowmodes.clear();
     state.lockedUntil = 0;
     raidTracker.delete(guildId);
+    clearAntiRaidLockdownState(guildId);
     return;
   }
 
@@ -2021,6 +2159,91 @@ async function releaseAntiRaidLockdown(guildId, { force = false } = {}) {
   state.previousSlowmodes.clear();
   state.lockedUntil = 0;
   raidTracker.delete(guildId);
+  clearAntiRaidLockdownState(guildId);
+}
+
+async function restoreActiveAntiRaidLockdowns() {
+  const now = Date.now();
+  for (const guild of client.guilds.cache.values()) {
+    const settings = getGuildSettings(guild.id);
+    const persistedState = getAntiRaidLockdownState(guild.id);
+    if (!settings.antiRaidEnabled) {
+      if (persistedState.lockedUntil || persistedState.previousSlowmodes.length > 0) {
+        raidTracker.set(guild.id, createAntiRaidState(persistedState));
+        await releaseAntiRaidLockdown(guild.id, { force: true });
+      }
+      continue;
+    }
+    if (persistedState.lockedUntil <= now) {
+      if (persistedState.lockedUntil || persistedState.previousSlowmodes.length > 0) {
+        clearAntiRaidLockdownState(guild.id);
+      }
+      continue;
+    }
+
+    const state = createAntiRaidState(persistedState);
+    raidTracker.set(guild.id, state);
+    await restoreAntiRaidSlowmodes(guild, state);
+    persistAntiRaidState(guild.id, state);
+    scheduleAntiRaidUnlock(guild.id, state);
+  }
+}
+
+async function restoreAntiRaidSlowmodes(guild, state) {
+  await guild.channels.fetch().catch(() => null);
+  if (state.previousSlowmodes.size === 0) {
+    const channels = guild.channels.cache.filter(
+      (channel) => channel && channel.isTextBased() && typeof channel.rateLimitPerUser === "number",
+    );
+    for (const channel of channels.values()) {
+      if (!channel.manageable) {
+        continue;
+      }
+
+      const nextSlowmode = getLockdownSlowmodeSeconds(
+        channel.rateLimitPerUser,
+        DEFAULT_ANTI_RAID_SLOWMODE_SECONDS,
+      );
+      if (nextSlowmode === channel.rateLimitPerUser) {
+        continue;
+      }
+
+      state.previousSlowmodes.set(channel.id, {
+        applied: nextSlowmode,
+        previous: Math.max(0, channel.rateLimitPerUser || 0),
+      });
+      await channel.setRateLimitPerUser(
+        nextSlowmode,
+        "Blueprint anti-raid lockdown restored",
+      ).catch(() => null);
+    }
+    return;
+  }
+
+  for (const [channelId, lockdown] of state.previousSlowmodes.entries()) {
+    const channel = guild.channels.cache.get(channelId);
+    if (
+      !channel ||
+      !channel.isTextBased() ||
+      typeof channel.rateLimitPerUser !== "number" ||
+      !channel.manageable
+    ) {
+      continue;
+    }
+
+    if (channel.rateLimitPerUser === lockdown.applied) {
+      continue;
+    }
+
+    if (channel.rateLimitPerUser !== lockdown.previous) {
+      continue;
+    }
+
+    await channel.setRateLimitPerUser(
+      lockdown.applied,
+      "Blueprint anti-raid lockdown restored",
+    ).catch(() => null);
+  }
 }
 
 function stopAntiRaidTracking() {
@@ -2284,9 +2507,35 @@ function formatAiReplyContent(reply) {
 }
 
 function logAiProviderResult(reply, context) {
+  metrics.increment("ai_provider_requests_total");
+  metrics.increment(
+    reply?.mode === "error"
+      ? "ai_provider_failures_total"
+      : `ai_provider_${reply?.mode || "unknown"}_total`,
+  );
   if (reply?.mode === "error") {
     logger.error("ai_provider_request_failed", context);
   }
+}
+
+function requireMetricsAccess(request, response, next) {
+  if (!config.metricsToken) {
+    response.status(404).end();
+    return;
+  }
+
+  const submittedToken = String(
+    request.get("x-metrics-token") ||
+      request.get("authorization")?.replace(/^Bearer\s+/i, "") ||
+      "",
+  ).trim();
+  if (!tokensMatch(config.metricsToken, submittedToken)) {
+    metrics.increment("metrics_auth_failures_total");
+    response.status(404).end();
+    return;
+  }
+
+  next();
 }
 
 function requireAuthPage(request, response, next) {
@@ -2338,6 +2587,7 @@ function shouldIssueCsrfToken(request) {
     request.path === "/data.json" ||
     request.path === "/healthz" ||
     request.path === "/readyz" ||
+    request.path === "/metrics" ||
     request.path.startsWith("/favicon")
   ) {
     return false;
@@ -2510,7 +2760,13 @@ async function fetchAuthJson(
     signal: AbortSignal.timeout(config.authRequestTimeoutSeconds * 1000),
   });
 
-  const payload = await result.json().catch(() => ({}));
+  const responseText = await readResponseText(result);
+  let payload = {};
+  try {
+    payload = responseText ? JSON.parse(responseText) : {};
+  } catch {
+    payload = {};
+  }
 
   if (!result.ok) {
     const error = new Error(payload.message || `Auth request failed with ${result.status}.`);
@@ -2957,6 +3213,7 @@ function registerShutdownHandlers(server) {
     stopCountdownAlertScheduler();
     stopAntiRaidTracking();
     automationCooldowns.clear();
+    aiCooldowns.clear();
     if (commandRegistrationRetryTimer) {
       clearTimeout(commandRegistrationRetryTimer);
       commandRegistrationRetryTimer = null;

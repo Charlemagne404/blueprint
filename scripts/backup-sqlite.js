@@ -19,6 +19,8 @@ const DATABASES = [
       "ticket_runtime_state",
       "ticket_open_tickets",
       "modmail_message_map",
+      "automation_cooldown_state",
+      "anti_raid_lockdown_state",
     ],
   },
   {

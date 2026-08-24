@@ -1255,9 +1255,6 @@ small,
 }
 
 .setup-rail {
-  position: sticky;
-  top: 18px;
-  z-index: 9;
   gap: 14px;
   padding: 18px 20px;
   background:
@@ -1293,6 +1290,74 @@ small,
   gap: 12px;
   flex-wrap: wrap;
   justify-content: flex-end;
+}
+
+.module-library-disclosure {
+  border-top: 1px solid rgba(148, 163, 184, 0.16);
+}
+
+.module-library-disclosure summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding-top: 14px;
+  color: var(--text);
+  cursor: pointer;
+  list-style: none;
+}
+
+.module-library-disclosure summary::-webkit-details-marker {
+  display: none;
+}
+
+.module-library-disclosure summary:focus-visible {
+  outline: 2px solid rgba(125, 211, 252, 0.9);
+  outline-offset: 5px;
+  border-radius: 8px;
+}
+
+.module-library-disclosure-copy {
+  display: grid;
+  gap: 5px;
+}
+
+.module-library-disclosure-copy > span:last-child {
+  color: var(--muted);
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.module-library-disclosure-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  color: #d9f7ff;
+  font-size: 0.82rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.module-library-disclosure-action span {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border: 1px solid rgba(125, 211, 252, 0.24);
+  border-radius: 999px;
+  transition: transform 160ms ease;
+}
+
+.module-library-disclosure[open] .module-library-disclosure-action span {
+  transform: rotate(180deg);
+}
+
+.module-library-disclosure-body {
+  display: grid;
+  gap: 14px;
+  padding-top: 18px;
 }
 
 .module-index-strip {
@@ -3036,10 +3101,6 @@ small,
     bottom: 12px;
   }
 
-  .setup-rail {
-    top: 12px;
-  }
-
   .module-index-strip {
     padding-bottom: 2px;
   }
@@ -3051,6 +3112,11 @@ small,
 
   .module-library-filter {
     width: min(100%, 260px);
+  }
+
+  .module-library-disclosure summary {
+    align-items: flex-start;
+    flex-direction: column;
   }
 
   .module-index-group-grid {

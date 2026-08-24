@@ -1,6 +1,11 @@
 const DEFAULT_ANTI_RAID_SLOWMODE_SECONDS = 10;
 
-function createCooldownStore({ now = () => Date.now() } = {}) {
+function createCooldownStore({
+  getExpiry = () => 0,
+  now = () => Date.now(),
+  onBlocked = () => {},
+  setExpiry = () => {},
+} = {}) {
   const cooldowns = new Map();
 
   return {
@@ -11,16 +16,39 @@ function createCooldownStore({ now = () => Date.now() } = {}) {
       const normalizedCooldownSeconds = Math.max(0, Number(cooldownSeconds) || 0);
       if (normalizedCooldownSeconds === 0) {
         cooldowns.delete(key);
+        try {
+          setExpiry(key, 0);
+        } catch {
+          // Persistence is a safety enhancement; it must not break the action.
+        }
         return true;
       }
 
       const currentTime = now();
-      const expiresAt = cooldowns.get(key) || 0;
+      let expiresAt = cooldowns.get(key) || 0;
+      if (!expiresAt) {
+        try {
+          expiresAt = Number(getExpiry(key)) || 0;
+        } catch {
+          expiresAt = 0;
+        }
+      }
       if (expiresAt > currentTime) {
+        try {
+          onBlocked(key);
+        } catch {
+          // Metrics and logging hooks must never break the cooldown itself.
+        }
         return false;
       }
 
-      cooldowns.set(key, currentTime + normalizedCooldownSeconds * 1000);
+      const nextExpiry = currentTime + normalizedCooldownSeconds * 1000;
+      cooldowns.set(key, nextExpiry);
+      try {
+        setExpiry(key, nextExpiry);
+      } catch {
+        // The in-memory cooldown remains active if persistence is unavailable.
+      }
       return true;
     },
   };

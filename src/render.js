@@ -857,7 +857,7 @@ function renderGuildSettings({
               ${
                 firstBlockedModuleId
                   ? escapeHtml(firstBlockedModuleBlocker)
-                  : "Use the module shortcuts below to review settings, make edits, and save when you are ready."
+                  : "Open the module library below to review settings, make edits, and save when you are ready."
               }
             </p>
           </div>
@@ -878,25 +878,36 @@ function renderGuildSettings({
             </button>
           </div>
         </div>
-        <div class="module-library-toolbar">
-          <div>
-            <span class="module-library-label">Module library</span>
-            <p>Jump straight to a system, grouped around the work your team is doing.</p>
+        <details class="module-library-disclosure">
+          <summary>
+            <span class="module-library-disclosure-copy">
+              <span class="module-library-label">Module library</span>
+              <span>Browse every module and jump straight to its settings.</span>
+            </span>
+            <span class="module-library-disclosure-action">Browse modules <span aria-hidden="true">↓</span></span>
+          </summary>
+          <div class="module-library-disclosure-body">
+            <div class="module-library-toolbar">
+              <div>
+                <span class="module-library-label">Module library</span>
+                <p>Jump straight to a system, grouped around the work your team is doing.</p>
+              </div>
+              <label class="module-library-filter">
+                <span>Show</span>
+                <select data-module-filter aria-label="Filter modules">
+                  <option value="all">All modules</option>
+                  <option value="needs-setup">Needs setup</option>
+                  <option value="enabled">Enabled</option>
+                  <option value="disabled">Disabled</option>
+                </select>
+              </label>
+            </div>
+            <p class="module-library-results" data-module-library-results aria-live="polite"></p>
+            <nav class="module-index-strip" aria-label="Module shortcuts">
+              ${moduleIndexHtml}
+            </nav>
           </div>
-          <label class="module-library-filter">
-            <span>Show</span>
-            <select data-module-filter aria-label="Filter modules">
-              <option value="all">All modules</option>
-              <option value="needs-setup">Needs setup</option>
-              <option value="enabled">Enabled</option>
-              <option value="disabled">Disabled</option>
-            </select>
-          </label>
-        </div>
-        <p class="module-library-results" data-module-library-results aria-live="polite"></p>
-        <nav class="module-index-strip" aria-label="Module shortcuts">
-          ${moduleIndexHtml}
-        </nav>
+        </details>
       </section>
 
       ${
@@ -1553,8 +1564,14 @@ function renderPrivacyPage({ authConfig, sessionUser }) {
       {
         title: "What Blueprint stores",
         paragraphs: [
-          "Blueprint stores the minimum service data needed to operate the website and Discord bot. That includes your authenticated website session, your linked Discord account identifier when provided by the Continental ID system, and per-server configuration saved through the dashboard.",
-          "Server settings can include channel IDs, role IDs, module toggles, message templates, and other configuration values required to run enabled modules.",
+          "Blueprint stores the service data needed to operate the website and Discord bot: an authenticated website session, the linked Discord account identifier provided by Continental ID, and per-server configuration saved through the dashboard.",
+          "Server settings can include channel and role IDs, module toggles, message templates, runtime state such as leveling and ticket records, suggestion numbering, starboard references, and modmail routing mappings.",
+        ],
+      },
+      {
+        title: "Discord content",
+        paragraphs: [
+          "Blueprint reads the Discord metadata and message events required by the modules you enable. Ticket transcripts are sent to the Discord channel you configure, and modmail forwards member messages to the configured staff inbox; those message contents remain Discord data rather than being copied into Blueprint's settings database.",
         ],
       },
       {
@@ -1573,7 +1590,13 @@ function renderPrivacyPage({ authConfig, sessionUser }) {
       {
         title: "Sharing and retention",
         paragraphs: [
-          "Blueprint configuration data is used internally to operate the service and is not intended for resale or marketing use. Data may be retained as long as it is needed to provide the bot, maintain configuration history, or satisfy operational and security needs.",
+          "Blueprint configuration data is used to operate the service and is not intended for resale or advertising. Web sessions expire after seven days. Guild settings and module runtime records remain until the server is removed or the operator performs the documented deletion workflow; logs and encrypted backups follow the deployment's retention policy.",
+        ],
+      },
+      {
+        title: "AI and external providers",
+        paragraphs: [
+          "When a server explicitly enables AI tools, the configured AI service and Continental ID access service receive the request data needed to answer the request and verify access. Blueprint does not store AI prompts or responses in its local SQLite databases. Provider retention, training use, and regional processing depend on the deployment's provider agreements and must be confirmed before public launch.",
         ],
       },
       {

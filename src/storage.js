@@ -194,6 +194,22 @@ db.exec(`
   )
 `);
 
+db.exec(`
+  CREATE TABLE IF NOT EXISTS automation_cooldown_state (
+    cooldown_key TEXT PRIMARY KEY,
+    guild_id TEXT NOT NULL,
+    expires_at INTEGER NOT NULL
+  )
+`);
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS anti_raid_lockdown_state (
+    guild_id TEXT PRIMARY KEY,
+    locked_until INTEGER NOT NULL DEFAULT 0,
+    previous_slowmodes TEXT NOT NULL DEFAULT '[]'
+  )
+`);
+
 ensureColumn("countdown_enabled", "INTEGER NOT NULL DEFAULT 0");
 ensureColumn("countdown_title", "TEXT NOT NULL DEFAULT ''");
 ensureColumn("countdown_target_date", "TEXT NOT NULL DEFAULT ''");
@@ -739,6 +755,7 @@ function clearCountdownAlertLastSentOn(guildId) {
 module.exports = {
   checkStorageHealth,
   clearCountdownAlertLastSentOn,
+  clearAntiRaidLockdownState,
   clearTicketPanelState,
   closeTicketForChannel,
   closeTicketForUser,
@@ -746,6 +763,8 @@ module.exports = {
   defaults,
   getNextSuggestionNumber,
   getCountdownAlertLastSentOn,
+  getAutomationCooldown,
+  getAntiRaidLockdownState,
   getGuildSettings,
   getLevelingMemberStats,
   getModmailMessageMapping,
@@ -755,6 +774,8 @@ module.exports = {
   getTicketPanelState,
   saveGuildSettings,
   setCountdownAlertLastSentOn,
+  setAutomationCooldown,
+  setAntiRaidLockdownState,
   setTicketPanelState,
   saveModmailMessageMapping,
   upsertLevelingMemberStats,
@@ -782,6 +803,93 @@ function setCountdownAlertLastSentOn(guildId, isoDate) {
     ON CONFLICT(guild_id) DO UPDATE SET
       last_sent_on = excluded.last_sent_on
   `).run(guildId, isoDate);
+}
+
+function getAutomationCooldown(cooldownKey) {
+  const key = String(cooldownKey || "");
+  if (!key) {
+    return 0;
+  }
+
+  const row = db
+    .prepare("SELECT expires_at FROM automation_cooldown_state WHERE cooldown_key = ?")
+    .get(key);
+  const expiresAt = Number(row?.expires_at) || 0;
+  if (expiresAt <= Date.now()) {
+    if (row) {
+      db.prepare("DELETE FROM automation_cooldown_state WHERE cooldown_key = ?").run(key);
+    }
+    return 0;
+  }
+
+  return expiresAt;
+}
+
+function setAutomationCooldown(cooldownKey, expiresAt) {
+  const key = String(cooldownKey || "");
+  const normalizedExpiry = Number(expiresAt) || 0;
+  if (!key) {
+    return;
+  }
+
+  if (normalizedExpiry <= Date.now()) {
+    db.prepare("DELETE FROM automation_cooldown_state WHERE cooldown_key = ?").run(key);
+    return;
+  }
+
+  db.prepare(`
+    INSERT INTO automation_cooldown_state (cooldown_key, guild_id, expires_at)
+    VALUES (?, ?, ?)
+    ON CONFLICT(cooldown_key) DO UPDATE SET
+      guild_id = excluded.guild_id,
+      expires_at = excluded.expires_at
+  `).run(key, key.split(":", 1)[0], normalizedExpiry);
+}
+
+function getAntiRaidLockdownState(guildId) {
+  const row = db
+    .prepare(`
+      SELECT locked_until, previous_slowmodes
+      FROM anti_raid_lockdown_state
+      WHERE guild_id = ?
+    `)
+    .get(guildId);
+
+  return {
+    lockedUntil: Number(row?.locked_until) || 0,
+    previousSlowmodes: parseJsonObjectArray(row?.previous_slowmodes),
+  };
+}
+
+function setAntiRaidLockdownState(guildId, { lockedUntil = 0, previousSlowmodes = [] } = {}) {
+  const entries = previousSlowmodes instanceof Map
+    ? [...previousSlowmodes].map(([channelId, value]) => ({ channelId, ...value }))
+    : Array.isArray(previousSlowmodes)
+      ? previousSlowmodes
+      : [];
+  const normalizedEntries = entries
+    .filter((entry) => entry && /^\d{16,20}$/.test(String(entry.channelId || "")))
+    .map((entry) => ({
+      applied: Math.max(0, Number(entry.applied) || 0),
+      channelId: String(entry.channelId),
+      previous: Math.max(0, Number(entry.previous) || 0),
+    }));
+
+  db.prepare(`
+    INSERT INTO anti_raid_lockdown_state (guild_id, locked_until, previous_slowmodes)
+    VALUES (?, ?, ?)
+    ON CONFLICT(guild_id) DO UPDATE SET
+      locked_until = excluded.locked_until,
+      previous_slowmodes = excluded.previous_slowmodes
+  `).run(
+    guildId,
+    Math.max(0, Number(lockedUntil) || 0),
+    JSON.stringify(normalizedEntries),
+  );
+}
+
+function clearAntiRaidLockdownState(guildId) {
+  db.prepare("DELETE FROM anti_raid_lockdown_state WHERE guild_id = ?").run(guildId);
 }
 
 function getNextSuggestionNumber(guildId) {
@@ -1061,6 +1169,17 @@ function parseJsonArray(value) {
   try {
     const parsed = JSON.parse(value);
     return Array.isArray(parsed) ? parsed.filter((entry) => typeof entry === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function parseJsonObjectArray(value) {
+  try {
+    const parsed = JSON.parse(value || "[]");
+    return Array.isArray(parsed)
+      ? parsed.filter((entry) => entry && typeof entry === "object")
+      : [];
   } catch {
     return [];
   }

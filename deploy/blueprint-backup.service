@@ -1,0 +1,17 @@
+[Unit]
+Description=Create a consistent Blueprint SQLite backup
+After=blueprint.service
+
+[Service]
+Type=oneshot
+User=blueprint
+Group=blueprint
+WorkingDirectory=/opt/blueprint
+EnvironmentFile=/etc/blueprint/blueprint.env
+Environment=BACKUP_DIR=/var/lib/blueprint-backups
+ExecStart=/usr/bin/node /opt/blueprint/scripts/backup-sqlite.js
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/blueprint /var/lib/blueprint-backups

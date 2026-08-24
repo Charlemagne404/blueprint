@@ -1,5 +1,29 @@
 # Changelog
 
+## Unreleased — 2026-08-25
+
+### Launch-readiness hardening
+
+- Added configurable auth/dashboard rate limits, AI request cooldowns, bounded external
+  response bodies, and correlation IDs for HTTP failures.
+- Added a token-protected `/metrics` endpoint with bounded latency, failure, module-task,
+  cooldown, and external-provider counters.
+- Persisted automation cooldowns across restarts and added regression coverage for recovery.
+- Persisted active anti-raid lockdown state and original slowmodes so a restart can restore or
+  safely release an in-progress lockdown.
+- Added tracked-file secret hygiene checks to the verification script and CI.
+- Added an explicit guild-data deletion command with confirmation and isolated tests.
+- Added data-retention, incident-response, capacity, systemd, backup-timer, and release-
+  evidence documentation/templates.
+
+### Compatibility and data notes
+
+- Existing guild settings remain compatible; the new `automation_cooldown_state` and
+  `anti_raid_lockdown_state` tables are created automatically for existing installations.
+- Production deployments must set a unique `METRICS_TOKEN` of at least 32 characters.
+- Guild deletion removes local Blueprint records only; Discord-side messages and external AI
+  provider state require their own approved deletion workflows.
+
 ## 1.0.1 — 2026-08-23
 
 ### Release-readiness hardening

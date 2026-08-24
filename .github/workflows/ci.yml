@@ -28,6 +28,12 @@ jobs:
       - name: Check JavaScript syntax
         run: npm run check:syntax
 
+      - name: Check tracked files for secrets
+        run: npm run check:secrets
+
+      - name: Check patch whitespace
+        run: git diff --check
+
       - name: Run tests
         run: npm test
 
@@ -47,3 +53,4 @@ jobs:
           DISCORD_CLIENT_ID: "123456789012345678"
           DISCORD_SESSION_SECRET: ci-placeholder-session-secret-at-least-32-chars
           VANGUARD_BACKEND_API_KEY: ci-placeholder-vanguard-key
+          METRICS_TOKEN: ci-placeholder-metrics-token-at-least-32-chars

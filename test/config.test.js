@@ -23,6 +23,7 @@ function productionConfig(overrides = {}) {
     sessionSecret: "a-realistic-session-secret-that-is-long-enough",
     token: "discord-token",
     clientId: "123456789012345678",
+    metricsToken: "metrics-token-that-is-long-enough-for-production",
     trustProxy: 1,
     vanguardBackendApiKey: "vanguard-key",
     ...overrides,
@@ -45,6 +46,14 @@ test("production config requires a trusted TLS proxy hop", () => {
   const result = config.validateRuntimeConfig(productionConfig({ trustProxy: 0 }));
 
   assert.match(result.errors.join("\n"), /TRUST_PROXY must be at least 1/);
+});
+
+test("production config requires a private metrics endpoint token", () => {
+  const result = config.validateRuntimeConfig(
+    productionConfig({ metricsToken: "" }),
+  );
+
+  assert.match(result.errors.join("\n"), /METRICS_TOKEN must be at least 32 characters/);
 });
 
 test("production config rejects trusted login values that are not origins", () => {

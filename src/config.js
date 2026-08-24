@@ -65,6 +65,10 @@ const config = {
   aiNumPredict: parseOptionalInteger(process.env.AI_NUM_PREDICT, { minimum: 1, maximum: 4096 }),
   aiRepeatPenalty: parseOptionalFloat(process.env.AI_REPEAT_PENALTY, { minimum: 0.8, maximum: 2 }),
   aiRequestTimeoutSeconds: parseInteger(process.env.AI_REQUEST_TIMEOUT_SECONDS, 60, { minimum: 2, maximum: 120 }),
+  aiRequestCooldownSeconds: parseInteger(process.env.AI_USER_COOLDOWN_SECONDS, 10, {
+    minimum: 0,
+    maximum: 120,
+  }),
   aiServerBaseUrl,
   aiSessionUrl: resolveAiServiceUrl("AI_SESSION_URL", process.env.AI_SESSION_URL || "", aiServerBaseUrl, "/session"),
   aiTemperature: parseOptionalFloat(process.env.AI_TEMPERATURE, { minimum: 0, maximum: 2 }),
@@ -75,6 +79,14 @@ const config = {
   authRequestTimeoutSeconds: parseInteger(process.env.AUTH_REQUEST_TIMEOUT_SECONDS, 10, {
     minimum: 2,
     maximum: 60,
+  }),
+  authRateLimitMaxRequests: parseInteger(process.env.AUTH_RATE_LIMIT_MAX_REQUESTS, 10, {
+    minimum: 1,
+    maximum: 1000,
+  }),
+  authRateLimitWindowSeconds: parseInteger(process.env.AUTH_RATE_LIMIT_WINDOW_SECONDS, 60, {
+    minimum: 1,
+    maximum: 3600,
   }),
   authLoginPopupUrl:
     process.env.AUTH_LOGIN_POPUP_URL || DEFAULT_AUTH_LOGIN_POPUP_URL,
@@ -102,12 +114,23 @@ const config = {
   dataDir: path.resolve(process.env.DATA_DIR || path.join(process.cwd(), "data")),
   guildId: process.env.DISCORD_GUILD_ID,
   isProduction,
+  metricsToken: String(process.env.METRICS_TOKEN || "").trim(),
   nodeEnv: process.env.NODE_ENV || "development",
   port: Number.parseInt(process.env.PORT || "3000", 10),
   sessionCookieName: process.env.SESSION_COOKIE_NAME || "blueprint.sid",
   sessionSecret: process.env.DISCORD_SESSION_SECRET,
   token: process.env.DISCORD_TOKEN,
   trustProxy: parseTrustProxy(process.env.TRUST_PROXY, isProduction ? 1 : 0),
+  dashboardWriteRateLimitMaxRequests: parseInteger(
+    process.env.DASHBOARD_WRITE_RATE_LIMIT_MAX_REQUESTS,
+    30,
+    { minimum: 1, maximum: 1000 },
+  ),
+  dashboardWriteRateLimitWindowSeconds: parseInteger(
+    process.env.DASHBOARD_WRITE_RATE_LIMIT_WINDOW_SECONDS,
+    60,
+    { minimum: 1, maximum: 3600 },
+  ),
   vanguardBackendApiKey: String(
     process.env.VANGUARD_BACKEND_API_KEY || process.env.VANGUARD_API_KEY || "",
   ).trim(),
@@ -172,6 +195,9 @@ function validateRuntimeConfig(runtimeConfig = config) {
     }
     if (runtimeConfig.aiIntegrationConfigured && !runtimeConfig.vanguardBackendApiKey) {
       errors.push("VANGUARD_BACKEND_API_KEY is required when NODE_ENV=production.");
+    }
+    if (String(runtimeConfig.metricsToken || "").length < 32) {
+      errors.push("METRICS_TOKEN must be at least 32 characters when NODE_ENV=production.");
     }
   } else if (String(runtimeConfig.sessionSecret || "").length > 0 && String(runtimeConfig.sessionSecret).length < 32) {
     warnings.push("DISCORD_SESSION_SECRET should be at least 32 characters before production deployment.");

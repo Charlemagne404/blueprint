@@ -10,9 +10,11 @@
     "test": "node --test --test-force-exit test/*.test.js",
     "backup": "node scripts/backup-sqlite.js",
     "check:production-config": "node scripts/check-production-config.js",
+    "check:secrets": "node scripts/check-secret-hygiene.js",
     "check:syntax": "node scripts/check-syntax.js",
+    "delete:guild-data": "node scripts/delete-guild-data.js",
     "verify:backup": "node scripts/verify-sqlite-backup.js",
-    "verify": "npm run check:syntax && npm test && npm audit --omit=dev --audit-level=high && npm run check:production-config"
+    "verify": "npm run check:syntax && npm run check:secrets && npm test && npm audit --omit=dev --audit-level=high && npm run check:production-config"
   },
   "engines": {
     "node": ">=20"

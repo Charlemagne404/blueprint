@@ -1,3 +1,5 @@
+const { readResponseText } = require("./http-client");
+
 function validateHttpUrl(name, value) {
   let url;
   try {
@@ -299,7 +301,10 @@ async function resolveContinentalUser(discordUserId, runtimeConfig) {
       body: { discordUserId: normalizedUserId },
       headers: buildBackendHeaders(runtimeConfig),
       method: "POST",
-      timeoutMs: 6000,
+      timeoutMs: Math.min(
+        6000,
+        (Number(runtimeConfig.authRequestTimeoutSeconds) || 6) * 1000,
+      ),
     });
 
     return {
@@ -434,7 +439,7 @@ async function requestJson(url, { body, headers = {}, method = "GET", timeoutMs 
     signal: AbortSignal.timeout(timeoutMs),
   });
 
-  const text = await response.text();
+  const text = await readResponseText(response);
   let payload = {};
   try {
     payload = text ? JSON.parse(text) : {};

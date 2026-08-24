@@ -154,6 +154,11 @@ AUTH_TRUSTED_LOGIN_ORIGINS=
 SESSION_COOKIE_NAME=blueprint.sid
 AUTH_REQUEST_TIMEOUT_SECONDS=10
 TRUST_PROXY=0
+AUTH_RATE_LIMIT_MAX_REQUESTS=10
+AUTH_RATE_LIMIT_WINDOW_SECONDS=60
+DASHBOARD_WRITE_RATE_LIMIT_MAX_REQUESTS=30
+DASHBOARD_WRITE_RATE_LIMIT_WINDOW_SECONDS=60
+METRICS_TOKEN=
 AI_SERVER_BASE_URL=http://localhost:3001
 AI_SERVER_URL=http://localhost:3001/ask
 AI_ASK_URL=
@@ -162,6 +167,7 @@ AI_HEALTH_URL=
 AI_MODELS_URL=
 AI_SESSION_URL=
 AI_REQUEST_TIMEOUT_SECONDS=60
+AI_USER_COOLDOWN_SECONDS=10
 AI_CHAT_STYLE=balanced
 AI_HISTORY_MESSAGES=12
 AI_USE_CONTEXT=true
@@ -198,6 +204,8 @@ The app exposes:
 
 - `/healthz` for a lightweight process health check
 - `/readyz` for bot and storage readiness
+- `/metrics` for token-protected Prometheus-compatible counters and latency summaries. Set
+  `METRICS_TOKEN` in production; the endpoint is intentionally unavailable without it.
 
 Privileged dashboard POST routes use same-origin checks and CSRF tokens. Run the app behind
 HTTPS in production so secure cookies and HSTS are active.
@@ -214,6 +222,7 @@ Run the repository checks used by CI with:
 
 ```bash
 npm run check:syntax
+npm run check:secrets
 npm audit --omit=dev --audit-level=high
 npm run check:production-config
 ```

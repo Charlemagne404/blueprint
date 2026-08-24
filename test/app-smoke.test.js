@@ -10,6 +10,7 @@ process.env.DISCORD_TOKEN = "blueprint-test-token";
 process.env.DISCORD_CLIENT_ID = "123456789012345678";
 process.env.DISCORD_SESSION_SECRET = "blueprint-test-session-secret-0123456789";
 process.env.BASE_URL = "http://localhost:3000";
+process.env.METRICS_TOKEN = "test-metrics-token-that-is-long-enough";
 process.env.DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "blueprint-app-"));
 
 const { app, client, start } = require("../src/index");
@@ -36,6 +37,14 @@ test("Express health and readiness routes are available without a Discord login"
     sessionReady: true,
     storageReady: true,
   });
+
+  const metricsDenied = await fetch(`${origin}/metrics`);
+  assert.equal(metricsDenied.status, 404);
+  const metrics = await fetch(`${origin}/metrics`, {
+    headers: { "X-Metrics-Token": process.env.METRICS_TOKEN },
+  });
+  assert.equal(metrics.status, 200);
+  assert.match(await metrics.text(), /blueprint_http_requests_total/);
 
   const home = await fetch(`${origin}/`);
   assert.equal(home.status, 200);

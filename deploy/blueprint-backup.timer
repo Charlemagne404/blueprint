@@ -1,0 +1,11 @@
+[Unit]
+Description=Nightly Blueprint SQLite backup
+
+[Timer]
+OnCalendar=*-*-* 03:15:00 UTC
+Persistent=true
+RandomizedDelaySec=15m
+Unit=blueprint-backup.service
+
+[Install]
+WantedBy=timers.target

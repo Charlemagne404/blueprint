@@ -4,6 +4,7 @@ const { PermissionFlagsBits, PermissionsBitField } = require("discord.js");
 
 const {
   canStaffReplyToModmail,
+  getModmailInboundContent,
   getModmailReferenceId,
   getModmailReplyContent,
 } = require("../src/modules/modmail-runtime");
@@ -62,4 +63,17 @@ test("modmail staff replies require the configured inbox and staff access", () =
 test("modmail reply text is bounded and ignores empty messages", () => {
   assert.equal(getModmailReplyContent({ content: "   " }), "");
   assert.equal(getModmailReplyContent({ content: "a".repeat(10) }, 5), "aaaa…");
+});
+
+test("modmail inbound content includes safe attachment links within a bound", () => {
+  const content = getModmailInboundContent({
+    attachments: new Map([
+      ["one", { url: "https://cdn.example.test/one.png" }],
+      ["two", { url: "javascript:alert(1)" }],
+    ]),
+    content: "Please see these files.",
+  });
+
+  assert.match(content, /https:\/\/cdn\.example\.test\/one\.png/);
+  assert.doesNotMatch(content, /javascript:/i);
 });

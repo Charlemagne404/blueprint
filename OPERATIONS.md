@@ -61,6 +61,43 @@ values, prompts, and token-like values are redacted by the application logger. K
 service journal access restricted to operators and configure journald retention/forwarding
 according to the deployment's incident-response and data-retention policy.
 
+The repository includes hardened systemd templates in `deploy/`. Adjust the installation
+paths only during deployment, keep `/etc/blueprint/blueprint.env` readable by the service
+account only, and enable both `blueprint.service` and the backup timer. The backup timer
+creates a consistent local copy; it is not the off-host encrypted backup by itself.
+
+## Capacity and abuse guardrails
+
+The current implementation has explicit bounded inputs and request controls:
+
+- Express JSON and form bodies are limited to 64 KiB.
+- Auth provider requests time out after the configured 2–60 seconds; auth routes are limited
+  by `AUTH_RATE_LIMIT_MAX_REQUESTS` per `AUTH_RATE_LIMIT_WINDOW_SECONDS` per client key.
+- Dashboard writes are limited by `DASHBOARD_WRITE_RATE_LIMIT_MAX_REQUESTS` per configured
+  window and server/session key.
+- AI questions are capped at 1,500 characters, Discord replies at 1,900 characters, history
+  at 1–24 messages, and provider calls at the configured 2–120 second timeout. A user/channel
+  cooldown is controlled by `AI_USER_COOLDOWN_SECONDS`.
+- Modmail and staff replies are capped at 1,800 characters. Ticket transcripts read at most
+  100 messages and are capped before delivery.
+- Ticket creation allows one tracked open ticket per member/server. Automation cooldowns are
+  persisted in SQLite so a process restart does not erase an active cooldown.
+- The backup and guild-deletion commands refuse ambiguous output/target paths and require
+  explicit confirmation for destructive guild-data removal.
+
+These limits are guardrails, not a load-test result. Complete the Discord/provider load test
+and define supported guild sizes, event rates, attachment policy, RPO, and RTO before launch.
+
+For the acceptance pass, use this initial private-beta operating envelope: up to 10,000
+members per guild, 60 joins/minute per guild for anti-raid evaluation, 10 handled message
+events/second/guild, 60 inbound modmail messages/minute/guild, and 6 AI requests/minute/user
+in a configured channel. Blueprint does not store or upload attachments; starboard and
+Discord messages may contain Discord-hosted attachment URLs. Exceeding this envelope requires
+a measured load test and an explicit capacity decision before public launch.
+
+See [DATA_RETENTION.md](DATA_RETENTION.md) for the data inventory and deletion workflow and
+[INCIDENT_RESPONSE.md](INCIDENT_RESPONSE.md) for incident containment and recovery actions.
+
 ## State and backups
 
 Blueprint stores its SQLite state in `DATA_DIR`:
