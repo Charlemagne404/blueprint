@@ -66,6 +66,7 @@ function renderModuleCard({
   const safeModuleId = escapeHtml(moduleId);
   const panelId = `module-panel-${safeModuleId}`;
   const sectionId = `module-${safeModuleId}`;
+  const moduleSymbol = getModuleSymbol(moduleId);
 
   return `
     <section
@@ -89,6 +90,7 @@ function renderModuleCard({
           <span class="module-card-copy">
             <span class="eyebrow">${escapeHtml(eyebrow)}</span>
             <span class="module-card-title-row">
+              <span class="module-card-symbol" aria-hidden="true">${moduleSymbol}</span>
               <span class="module-card-title">${titleHtml}</span>
               <span class="module-card-chevron" aria-hidden="true"></span>
             </span>
@@ -127,6 +129,30 @@ function renderModuleCard({
       </div>
     </section>
   `;
+}
+
+function getModuleSymbol(moduleId) {
+  const symbols = {
+    "ai-tools": "✦",
+    announcements: "〰",
+    "anti-raid": "⌁",
+    applications: "◫",
+    "audit-log": "◌",
+    "auto-moderation": "⊘",
+    "auto-role": "◇",
+    automations: "↗",
+    countdown: "◷",
+    "join-screening": "◉",
+    leveling: "↑",
+    modmail: "✉",
+    "reaction-roles": "◇",
+    starboard: "★",
+    suggestions: "↗",
+    tickets: "□",
+    welcome: "✦",
+  };
+
+  return symbols[moduleId] || "◌";
 }
 
 function renderModuleFacts(facts = []) {

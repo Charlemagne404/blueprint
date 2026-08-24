@@ -539,11 +539,6 @@ function renderDashboard({
         : guild.enabledCount > 0
           ? "Configured and ready to use"
           : "No modules enabled yet";
-      const setupCopy = guild.attentionCount > 0
-        ? "Jump back in and finish the missing pieces first."
-        : guild.enabledCount > 0
-          ? "Review settings, refine modules, or add more features."
-          : "Open this server and start enabling modules from the dashboard.";
 
       return `
         <a
@@ -564,17 +559,16 @@ function renderDashboard({
             <div class="server-avatar">${icon}</div>
             <div class="server-card-head-copy">
               <h2>${escapeHtml(guild.name)}</h2>
-              <p>Installed and manageable by your linked Discord account</p>
+              <span class="server-card-workspace">Server workspace</span>
             </div>
           </div>
           ${summaryHtml}
           <div class="server-card-progress">
             <strong>${escapeHtml(setupHeadline)}</strong>
-            <p>${escapeHtml(setupCopy)}</p>
           </div>
           <div class="server-card-actions">
-            <span class="server-card-action-label">${guild.attentionCount > 0 ? "Prioritized first" : "Ready when you are"}</span>
-            <span class="server-card-action-text">${escapeHtml(actionLabel)}</span>
+            <span class="server-card-action-label">${guild.attentionCount > 0 ? "Setup available" : "Ready to configure"}</span>
+            <span class="server-card-action-text">${escapeHtml(actionLabel)} <span aria-hidden="true">→</span></span>
           </div>
         </a>
       `;
@@ -586,16 +580,27 @@ function renderDashboard({
 
   const body = `
     <main class="dashboard-page" id="main-content">
-      <section class="section-header">
+      <section class="section-header dashboard-heading">
         <div>
           <p class="eyebrow">${escapeHtml(onboardingState.dashboardEyebrow)}</p>
           <h1>${escapeHtml(onboardingState.dashboardTitle)}</h1>
           <p class="section-copy">${escapeHtml(onboardingState.dashboardCopy)}</p>
         </div>
-        <div class="section-actions">
-          ${renderDashboardAction(
-            showServerControls ? onboardingState.secondaryAction : onboardingState.primaryAction,
-          )}
+        <div class="dashboard-heading-actions">
+          ${
+            showServerControls
+              ? `<div class="dashboard-heading-stats" aria-label="Server status">
+                  <span><strong>${sortedGuilds.length}</strong> installed</span>
+                  <span class="${attentionServers ? "has-attention" : ""}"><strong>${attentionServers}</strong> need setup</span>
+                  <span><strong>${readyServers}</strong> ready</span>
+                </div>`
+              : ""
+          }
+          <div class="section-actions">
+            ${renderDashboardAction(
+              showServerControls ? onboardingState.secondaryAction : onboardingState.primaryAction,
+            )}
+          </div>
         </div>
       </section>
       ${
@@ -623,38 +628,20 @@ function renderDashboard({
           `
           : ""
       }
-      <section class="settings-card dashboard-spotlight ${showServerControls ? "" : "is-hidden"}">
-        <div class="dashboard-spotlight-copy">
-          <p class="eyebrow">Setup overview</p>
-          <h2>${escapeHtml(onboardingState.dashboardTitle)}</h2>
-          <p class="card-copy">
-            ${escapeHtml(onboardingState.dashboardCopy)}
-          </p>
-        </div>
-        <div class="dashboard-spotlight-stats">
-          <span class="dashboard-summary-pill">${sortedGuilds.length} installed</span>
-          <span class="dashboard-summary-pill">${attentionServers} need setup</span>
-          <span class="dashboard-summary-pill">${readyServers} ready</span>
-        </div>
-      </section>
       <section class="dashboard-toolbar ${showServerControls ? "" : "is-hidden"}">
         <label class="search-field">
-          <span class="search-field-label">Search servers</span>
+          <span class="search-field-label">Find a server</span>
           <input
             type="search"
-            placeholder="Search by server name"
+            placeholder="Search your servers"
             data-guild-search
           />
         </label>
         <div class="dashboard-toolbar-actions">
           <label class="checkbox-chip">
             <input type="checkbox" data-guild-attention-filter />
-            <span>Show attention only</span>
+            <span>Needs setup</span>
           </label>
-          <div class="dashboard-summary">
-            <span class="dashboard-summary-pill">${sortedGuilds.length} servers</span>
-            <span class="dashboard-summary-pill">${attentionServers} need setup</span>
-          </div>
         </div>
       </section>
       ${
@@ -784,20 +771,48 @@ function renderGuildSettings({
       `,
     )
     .join("");
+  const guildIconUrl = getGuildIconUrl(guild);
+  const guildInitials = guild.name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part.slice(0, 1))
+    .join("")
+    .toUpperCase() || "BP";
+  const workspaceStatus = pageMeta?.attentionModules
+    ? `${pageMeta.attentionModules} item${pageMeta.attentionModules === 1 ? "" : "s"} need attention`
+    : "Setup is on track";
 
   const body = `
     <main class="settings-page" id="main-content">
-      <section class="section-header">
-        <div>
-          <p class="eyebrow">Server settings</p>
-          <h1>${escapeHtml(guild.name)}</h1>
-          <p class="section-copy">
-            Jump between modules, resolve blockers quickly, and keep every change scoped to this
-            server only.
-          </p>
+      <section class="workspace-hero">
+        <div class="workspace-context" aria-label="Breadcrumb">
+          <a href="/dashboard"><span aria-hidden="true">←</span> All servers</a>
+          <span aria-hidden="true">/</span>
+          <span>Server workspace</span>
         </div>
-        <div class="section-actions">
-          <a class="button button-ghost" href="/dashboard">Back</a>
+        <div class="workspace-hero-body">
+          <div class="workspace-server-mark" aria-hidden="true">
+            ${
+              guildIconUrl
+                ? `<img src="${escapeHtml(guildIconUrl)}" alt="" />`
+                : escapeHtml(guildInitials)
+            }
+          </div>
+          <div class="workspace-hero-copy">
+            <p class="eyebrow">Blueprint workspace</p>
+            <h1>${escapeHtml(guild.name)}</h1>
+            <p>
+              A clear home for this server’s modules, setup tasks, and saved configuration.
+            </p>
+          </div>
+          <div class="workspace-hero-status">
+            <span class="status-pill status-pill-${pageMeta?.attentionModules ? "incomplete" : "live"}">
+              <span class="workspace-status-dot" aria-hidden="true"></span>
+              ${escapeHtml(workspaceStatus)}
+            </span>
+            <span>Changes stay scoped to this server</span>
+          </div>
         </div>
       </section>
 
@@ -863,9 +878,25 @@ function renderGuildSettings({
             </button>
           </div>
         </div>
-        <div class="module-index-strip" aria-label="Module shortcuts">
-          ${moduleIndexHtml}
+        <div class="module-library-toolbar">
+          <div>
+            <span class="module-library-label">Module library</span>
+            <p>Jump straight to a system, grouped around the work your team is doing.</p>
+          </div>
+          <label class="module-library-filter">
+            <span>Show</span>
+            <select data-module-filter aria-label="Filter modules">
+              <option value="all">All modules</option>
+              <option value="needs-setup">Needs setup</option>
+              <option value="enabled">Enabled</option>
+              <option value="disabled">Disabled</option>
+            </select>
+          </label>
         </div>
+        <p class="module-library-results" data-module-library-results aria-live="polite"></p>
+        <nav class="module-index-strip" aria-label="Module shortcuts">
+          ${moduleIndexHtml}
+        </nav>
       </section>
 
       ${
@@ -1738,6 +1769,53 @@ const MODULE_SECTION_IDS = {
   welcome: "module-welcome",
 };
 
+const MODULE_LIBRARY_GROUPS = [
+  {
+    key: "safety",
+    label: "Safety & oversight",
+    moduleKeys: ["auditLog", "autoModeration", "joinScreening", "antiRaid"],
+  },
+  {
+    key: "community",
+    label: "Community systems",
+    moduleKeys: [
+      "welcome",
+      "autoRole",
+      "announcements",
+      "starboard",
+      "suggestions",
+      "reactionRoles",
+      "applications",
+      "leveling",
+    ],
+  },
+  {
+    key: "operations",
+    label: "Staff workflows",
+    moduleKeys: ["countdown", "tickets", "automations", "modmail", "aiTools"],
+  },
+];
+
+const MODULE_SYMBOLS = {
+  aiTools: "✦",
+  announcements: "〰",
+  antiRaid: "⌁",
+  applications: "◫",
+  auditLog: "◌",
+  autoModeration: "⊘",
+  autoRole: "◇",
+  automations: "↗",
+  countdown: "◷",
+  joinScreening: "◉",
+  leveling: "↑",
+  modmail: "✉",
+  reactionRoles: "◇",
+  starboard: "★",
+  suggestions: "↗",
+  tickets: "□",
+  welcome: "✦",
+};
+
 function getCountdownStatusLabel(state) {
   if (state === "upcoming") {
     return "Live";
@@ -1819,8 +1897,45 @@ function formatExcludedDateChipLabel(isoDate) {
 }
 
 function renderModuleIndex(modules = []) {
-  return modules
-    .map((module) => `
+  const modulesByKey = new Map(modules.map((module) => [module.key, module]));
+  const renderedKeys = new Set();
+  const groups = MODULE_LIBRARY_GROUPS.map((group) => {
+    const groupModules = group.moduleKeys
+      .map((moduleKey) => modulesByKey.get(moduleKey))
+      .filter(Boolean);
+    groupModules.forEach((module) => renderedKeys.add(module.key));
+
+    if (!groupModules.length) {
+      return "";
+    }
+
+    return `
+      <section class="module-index-group module-index-group-${group.key}" data-module-group>
+        <h3>${escapeHtml(group.label)}</h3>
+        <div class="module-index-group-grid">
+          ${groupModules.map(renderModuleIndexCard).join("")}
+        </div>
+      </section>
+    `;
+  });
+  const remainingModules = modules.filter((module) => !renderedKeys.has(module.key));
+
+  if (remainingModules.length) {
+    groups.push(`
+      <section class="module-index-group module-index-group-other" data-module-group>
+        <h3>More tools</h3>
+        <div class="module-index-group-grid">
+          ${remainingModules.map(renderModuleIndexCard).join("")}
+        </div>
+      </section>
+    `);
+  }
+
+  return groups.join("");
+}
+
+function renderModuleIndexCard(module) {
+  return `
       <a
         class="module-index-item module-index-item-${escapeHtml(module.state)} ${module.blocker ? "is-alert" : ""}"
         href="#${getModuleSectionId(module.key)}"
@@ -1834,7 +1949,7 @@ function renderModuleIndex(modules = []) {
         title="${escapeHtml(getModuleNavigationSummary(module))}"
       >
         <span class="module-index-top">
-          <span class="module-index-name" data-module-nav-name="${escapeHtml(module.key)}">${escapeHtml(module.label)}</span>
+          <span class="module-index-name"><span class="module-index-symbol" aria-hidden="true">${getModuleSymbol(module.key)}</span><span data-module-nav-name="${escapeHtml(module.key)}">${escapeHtml(module.label)}</span></span>
           <span
             class="status-pill status-pill-${escapeHtml(module.state)}"
             data-module-nav-pill="${escapeHtml(module.key)}"
@@ -1846,8 +1961,19 @@ function renderModuleIndex(modules = []) {
           ${escapeHtml(getModuleNavigationMeta(module))}
         </span>
       </a>
-    `)
-    .join("");
+    `;
+}
+
+function getModuleSymbol(moduleKey) {
+  return MODULE_SYMBOLS[moduleKey] || "◌";
+}
+
+function getGuildIconUrl(guild) {
+  if (!guild || typeof guild.iconURL !== "function") {
+    return "";
+  }
+
+  return guild.iconURL({ size: 256 }) || "";
 }
 
 function getModuleSectionId(moduleKey) {

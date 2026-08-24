@@ -2592,7 +2592,7 @@ async function getManageableGuilds(discordUserId) {
         return {
           attentionCount: summary.attentionCount,
           enabledCount: summary.enabledCount,
-          iconUrl: guild.iconURL({ size: 128 }),
+          iconUrl: guild.iconURL({ size: 256 }),
           id: guild.id,
           name: guild.name,
           statusLabel: summary.statusLabel,

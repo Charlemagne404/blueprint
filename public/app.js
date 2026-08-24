@@ -496,6 +496,66 @@
     });
   }
 
+  function moduleNavigationMatchesFilter(card, filter) {
+    if (filter === "all") {
+      return true;
+    }
+
+    const enabled = card.getAttribute("data-module-enabled") === "true";
+    const state = safeText(card.getAttribute("data-module-state"));
+    const blocker = safeText(card.getAttribute("data-module-blocker"));
+
+    if (filter === "needs-setup") {
+      return enabled && (state === "incomplete" || Boolean(blocker));
+    }
+
+    return filter === "enabled" ? enabled : !enabled;
+  }
+
+  function syncModuleLibraryFilter() {
+    const filter = document.querySelector("[data-module-filter]");
+    const results = document.querySelector("[data-module-library-results]");
+    if (!filter) {
+      return;
+    }
+
+    const selectedFilter = safeText(filter.value) || "all";
+    const cards = Array.from(document.querySelectorAll("[data-module-nav]"));
+    let visibleCount = 0;
+
+    cards.forEach((card) => {
+      const visible = moduleNavigationMatchesFilter(card, selectedFilter);
+      card.hidden = !visible;
+      if (visible) {
+        visibleCount += 1;
+      }
+    });
+
+    document.querySelectorAll("[data-module-group]").forEach((group) => {
+      group.hidden = !group.querySelector("[data-module-nav]:not([hidden])");
+    });
+
+    if (results) {
+      const filterLabels = {
+        all: "all modules",
+        disabled: "disabled modules",
+        enabled: "enabled modules",
+        "needs-setup": "modules that need setup",
+      };
+      results.textContent = `Showing ${visibleCount} ${filterLabels[selectedFilter] || "modules"}.`;
+    }
+  }
+
+  function bindModuleLibraryFilter() {
+    const filter = document.querySelector("[data-module-filter]");
+    if (!filter) {
+      return;
+    }
+
+    filter.addEventListener("change", syncModuleLibraryFilter);
+    syncModuleLibraryFilter();
+  }
+
   function focusFlashNotice() {
     const notice = document.querySelector("[data-flash-notice]");
     if (!notice || typeof notice.focus !== "function") {
@@ -1067,6 +1127,8 @@
       if (navMeta) {
         navMeta.textContent = getModuleNavigationMeta(module);
       }
+
+      syncModuleLibraryFilter();
     }
 
     function getFirstBlockedModuleKey(moduleState) {
@@ -2053,6 +2115,7 @@
   bindLinkDiscordButton();
   bindModuleCards();
   bindModuleJumpLinks();
+  bindModuleLibraryFilter();
   bindCountdownControls();
   bindGuildSearchControls();
   bindSettingsFormUX();
