@@ -123,8 +123,6 @@ DISCORD_CLIENT_ID=
 DISCORD_SESSION_SECRET=
 AUTH_API_BASE_URL=
 AUTH_LOGIN_POPUP_URL=
-AI_SERVER_BASE_URL=
-VANGUARD_BACKEND_API_KEY=
 ```
 
 For production, also set:
@@ -137,7 +135,10 @@ DATA_DIR=/var/lib/blueprint
 
 `DISCORD_SESSION_SECRET` should be a unique random value of at least 32 characters. When
 `NODE_ENV=production`, startup fails if required URLs are invalid, `BASE_URL` is not HTTPS,
-or the session secret is too short.
+the auth API is not HTTPS, or the session secret is too short. If AI or Continental ID
+server-side resolution is explicitly configured, the Vanguard backend key is required too.
+Set `TRUST_PROXY` to the number of trusted reverse-proxy hops (normally `1` behind the
+production HTTPS proxy); keep it `0` when serving the app directly.
 
 The Continental ID client is installed from a pinned GitHub commit archive, so `npm ci`
 works from a clean checkout without requiring a sibling `../continental-id-client` directory.
@@ -152,6 +153,8 @@ DISCORD_GUILD_ID=
 AUTH_TRUSTED_LOGIN_ORIGINS=
 SESSION_COOKIE_NAME=blueprint.sid
 AUTH_REQUEST_TIMEOUT_SECONDS=10
+TRUST_PROXY=0
+AI_SERVER_BASE_URL=http://localhost:3001
 AI_SERVER_URL=http://localhost:3001/ask
 AI_ASK_URL=
 AI_CHAT_URL=
@@ -175,6 +178,7 @@ CONTINENTAL_ID_HEALTH_URL=
 CONTINENTAL_ID_RESOLVE_URL=
 CONTINENTAL_ID_LOGIN_URL=https://login.continental-hub.com/popup.html
 CONTINENTAL_ID_DASHBOARD_URL=https://dashboard.continental-hub.com/?tab=settings
+VANGUARD_BACKEND_API_KEY=
 VANGUARD_BACKEND_KEY_HEADER=X-Vanguard-Api-Key
 VANGUARD_INSTANCE_HEADER=X-Vanguard-Instance-Id
 VANGUARD_INSTANCE_ID=

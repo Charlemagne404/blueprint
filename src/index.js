@@ -34,6 +34,8 @@ const {
 } = require("./auth-contract");
 const continentalIdBrowserGlobalPath = require.resolve("@continental/id-client/browser-global");
 const { createSessionStore } = require("./session-store");
+const logger = require("./logger");
+const { normalizeReturnTo, tokensMatch } = require("./security-utils");
 const {
   renderAuthComplete,
   renderDashboard,
@@ -188,18 +190,19 @@ const {
 
 const runtimeConfigValidation = config.validateRuntimeConfig();
 for (const warning of runtimeConfigValidation.warnings) {
-  console.warn(`Config warning: ${warning}`);
+  logger.warn("configuration_warning", { warning });
 }
 if (runtimeConfigValidation.errors.length > 0) {
-  console.error("Invalid runtime configuration:");
+  logger.error("invalid_runtime_configuration");
   for (const error of runtimeConfigValidation.errors) {
-    console.error(`- ${error}`);
+    logger.error("configuration_error", { error });
   }
   process.exit(1);
 }
 
 const SESSION_COOKIE_MAX_AGE_MS = 1000 * 60 * 60 * 24 * 7;
 const COMMAND_REGISTRATION_RETRY_MS = 1000 * 60 * 5;
+const DISCORD_LOGIN_RETRY_MS = 1000 * 60 * 5;
 const APPLICATION_MODAL_CUSTOM_ID = "applications-submit";
 const APPLICATION_ANSWER_INPUT_PREFIX = "applications-answer-";
 const sessionStore = createSessionStore({
@@ -299,7 +302,7 @@ const addBotUrl =
   `&scope=bot%20applications.commands&permissions=${invitePermissions}`;
 const authPopupStaticDir = resolveAuthPopupStaticDir();
 
-app.set("trust proxy", 1);
+app.set("trust proxy", config.trustProxy);
 app.use(express.json({ limit: "64kb" }));
 app.use(express.urlencoded({ extended: false, limit: "64kb" }));
 app.use(
@@ -339,9 +342,9 @@ if (authPopupStaticDir) {
     response.sendFile(assetPath);
   });
 } else {
-  console.warn(
-    "Auth popup assets were not found in the local Dashboard repo. /auth-popup will remain unavailable.",
-  );
+  logger.warn("auth_popup_assets_unavailable", {
+    message: "Local Dashboard login assets were not found; /auth-popup is unavailable.",
+  });
 }
 app.use(ensureCsrfToken);
 app.use(requireTrustedOrigin);
@@ -408,20 +411,24 @@ app.get("/healthz", (request, response) => {
 });
 
 app.get("/readyz", (request, response) => {
+  let storageReady = false;
+  let sessionReady = false;
   try {
     checkStorageHealth();
-    response.status(client.isReady() ? 200 : 503).json({
-      botReady: client.isReady(),
-      ok: client.isReady(),
-      storageReady: true,
-    });
+    storageReady = true;
+    sessionReady = sessionStore.checkHealth();
   } catch (error) {
-    response.status(503).json({
-      botReady: client.isReady(),
-      ok: false,
-      storageReady: false,
-    });
+    storageReady = false;
   }
+
+  const botReady = client.isReady();
+  const ok = botReady && storageReady && sessionReady;
+  response.status(ok ? 200 : 503).json({
+    botReady,
+    ok,
+    sessionReady,
+    storageReady,
+  });
 });
 
 app.get("/robots.txt", (request, response) => {
@@ -569,7 +576,21 @@ app.post("/auth/link/discord/start", requireAuthJson, requireCsrfToken, async (r
 });
 
 app.get("/logout", (request, response) => {
-  request.session.destroy(() => {
+  response.redirect("/");
+});
+
+app.post("/logout", requireCsrfToken, (request, response, next) => {
+  request.session.destroy((error) => {
+    if (error) {
+      next(error);
+      return;
+    }
+
+    response.clearCookie(config.sessionCookieName, {
+      httpOnly: true,
+      sameSite: "lax",
+      secure: config.baseUrl.startsWith("https://"),
+    });
     response.redirect("/");
   });
 });
@@ -746,8 +767,7 @@ app.post("/dashboard/:guildId", requireAuthPage, requireCsrfToken, async (reques
     }
 
     await syncTicketPanel(guild, settings).catch((error) => {
-      console.error(`Failed to sync ticket panel for guild ${guild.id}.`);
-      console.error(error);
+      logger.error("ticket_panel_sync_failed", { guildId: guild.id }, error);
     });
 
     response.redirect(`/dashboard/${guild.id}?saved=1`);
@@ -791,11 +811,21 @@ app.use((request, response) => {
 });
 
 app.use((error, request, response, next) => {
-  console.error(error);
   const correlationId = error.authCorrelationId || crypto.randomUUID();
   const authCode =
     error.code ||
     (typeof error.statusCode === "number" ? mapAuthErrorCode(error.statusCode) : null);
+  logger.error(
+    "request_failed",
+    {
+      code: authCode || "",
+      correlationId,
+      method: request.method,
+      path: request.path,
+      statusCode: error.statusCode || 500,
+    },
+    error,
+  );
 
   if (response.headersSent) {
     next(error);
@@ -859,12 +889,18 @@ async function registerCommands() {
     await rest.put(Routes.applicationGuildCommands(config.clientId, config.guildId), {
       body,
     });
-    console.log(`Registered ${body.length} guild slash commands.`);
+    logger.info("slash_commands_registered", {
+      commandCount: body.length,
+      scope: "guild",
+    });
     return;
   }
 
   await rest.put(Routes.applicationCommands(config.clientId), { body });
-  console.log(`Registered ${body.length} global slash commands.`);
+  logger.info("slash_commands_registered", {
+    commandCount: body.length,
+    scope: "global",
+  });
 }
 
 let commandRegistrationInFlight = false;
@@ -884,8 +920,7 @@ async function registerCommandsWithRetry() {
       commandRegistrationRetryTimer = null;
     }
   } catch (error) {
-    console.error("Failed to register slash commands.");
-    console.error(error);
+    logger.error("slash_command_registration_failed", {}, error);
 
     if (!commandRegistrationRetryTimer) {
       commandRegistrationRetryTimer = setTimeout(() => {
@@ -899,13 +934,47 @@ async function registerCommandsWithRetry() {
 }
 
 client.once(Events.ClientReady, (readyClient) => {
-  console.log(`Logged in as ${readyClient.user.tag}`);
+  logger.info("discord_ready", { username: readyClient.user.tag });
   void registerCommandsWithRetry();
   startCountdownAlertScheduler();
   syncTicketPanelsForClient().catch((error) => {
-    console.error("Failed to sync ticket panels.");
-    console.error(error);
+    logger.error("ticket_panel_sync_failed", {}, error);
   });
+});
+
+client.on(Events.Error, (error) => {
+  logger.error("discord_client_error", {}, error);
+});
+
+client.on(Events.Warn, (message) => {
+  logger.warn("discord_warning", { message });
+});
+
+client.on(Events.ShardError, (error, shardId) => {
+  logger.error("discord_shard_error", { shardId }, error);
+});
+
+client.on(Events.ShardDisconnect, (event, shardId) => {
+  logger.warn("discord_shard_disconnected", {
+    code: event?.code,
+    shardId,
+  });
+});
+
+client.on(Events.ShardReconnecting, (shardId) => {
+  logger.info("discord_shard_reconnecting", { shardId });
+});
+
+client.on(Events.ShardReady, (shardId) => {
+  logger.info("discord_shard_ready", { shardId });
+});
+
+client.on(Events.ShardResume, (shardId, replayedEvents) => {
+  logger.info("discord_shard_resumed", { replayedEvents, shardId });
+});
+
+client.on(Events.Invalidated, () => {
+  logger.error("discord_session_invalidated");
 });
 
 client.on(Events.InteractionCreate, async (interaction) => {
@@ -926,8 +995,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
     await handleCommand(interaction);
   } catch (error) {
-    console.error("Interaction handling failed.");
-    console.error(error);
+    logger.error("interaction_handling_failed", {}, error);
     await replyWithRuntimeError(interaction);
   }
 });
@@ -1048,11 +1116,11 @@ client.on(Events.MessageReactionRemove, async (reaction, user) => {
 });
 
 async function runIsolatedTask(label, task, fallbackValue = undefined) {
+  const correlationId = crypto.randomUUID();
   try {
     return await task();
   } catch (error) {
-    console.error(`Failed ${label}.`);
-    console.error(error);
+    logger.error("isolated_task_failed", { correlationId, label }, error);
     return fallbackValue;
   }
 }
@@ -1489,6 +1557,11 @@ async function handleAiCommand(interaction, settings) {
     userId: interaction.user.id,
     username: interaction.user.tag,
   });
+  logAiProviderResult(reply, {
+    channelId: interaction.channelId,
+    guildId: interaction.guildId,
+    userId: interaction.user.id,
+  });
 
   await interaction.editReply({
     allowedMentions: { parse: [] },
@@ -1546,6 +1619,15 @@ async function handleAiResetCommand(interaction, settings) {
     buildAiSessionId(interaction.guildId, interaction.channelId, interaction.user.id),
     config,
   );
+
+  if (!result.ok) {
+    logger.error("ai_session_reset_failed", {
+      channelId: interaction.channelId,
+      guildId: interaction.guildId,
+      statusCode: result.status || 0,
+      userId: interaction.user.id,
+    });
+  }
 
   if (result.ok) {
     await interaction.editReply("AI session memory reset for this channel.");
@@ -1611,6 +1693,11 @@ async function handleAiToolsMessage(message, settings) {
     userId: message.author.id,
     username: message.author.tag,
   });
+  logAiProviderResult(reply, {
+    channelId: message.channelId,
+    guildId: message.guild.id,
+    userId: message.author.id,
+  });
 
   await message.reply({
     allowedMentions: { parse: [] },
@@ -1674,8 +1761,7 @@ async function handleModmailInbound(message) {
       }
       return;
     } catch (error) {
-      console.error(`Failed modmail routing for guild ${guild.id}.`);
-      console.error(error);
+      logger.error("modmail_routing_failed", { guildId: guild.id }, error);
     }
   }
 }
@@ -1722,8 +1808,11 @@ async function handleModmailStaffReply(message) {
     });
     await message.react("✅").catch(() => null);
   } catch (error) {
-    console.error(`Failed to deliver modmail reply to ${mapping.userId}.`);
-    console.error(error);
+    logger.error(
+      "modmail_reply_delivery_failed",
+      { guildId: mapping.guildId, userId: mapping.userId },
+      error,
+    );
     await message.reply({
       allowedMentions: { parse: [] },
       content: "Blueprint could not deliver that reply. The member may have DMs disabled.",
@@ -1846,8 +1935,7 @@ async function evaluateAntiRaid(guild, settings) {
       allowedMentions: { parse: [] },
       content: `🚨 Anti-raid triggered: ${state.joinTimestamps.length} joins within ${settings.antiRaidWindowSeconds}s. Applying temporary slowmode lockdown for ${settings.antiRaidLockdownMinutes} minute(s).`,
     }).catch((error) => {
-      console.error(`Failed to send an anti-raid alert for guild ${guild.id}.`);
-      console.error(error);
+      logger.error("anti_raid_alert_failed", { guildId: guild.id }, error);
     });
   }
 
@@ -1953,8 +2041,7 @@ async function syncTicketPanelsForClient() {
 
     await guild.channels.fetch().catch(() => null);
     await syncTicketPanel(guild, settings).catch((error) => {
-      console.error(`Failed to sync ticket panel for guild ${guild.id}.`);
-      console.error(error);
+      logger.error("ticket_panel_sync_failed", { guildId: guild.id }, error);
     });
   }
 }
@@ -2159,6 +2246,13 @@ async function getStarboardChannel(guild, channelId) {
 
 async function getAiAccessError(discordUserId) {
   const result = await resolveContinentalUser(discordUserId, config);
+  if (!result?.ok) {
+    logger.warn("continental_user_resolution_failed", {
+      configured: Boolean(result?.configured),
+      discordUserId,
+      statusCode: result?.statusCode || 0,
+    });
+  }
   return getAiAccessRequirementMessage(result, config, "Blueprint AI");
 }
 
@@ -2187,6 +2281,12 @@ function formatAiReplyContent(reply) {
     return `AI service error\n\n${answer}`;
   }
   return answer;
+}
+
+function logAiProviderResult(reply, context) {
+  if (reply?.mode === "error") {
+    logger.error("ai_provider_request_failed", context);
+  }
 }
 
 function requireAuthPage(request, response, next) {
@@ -2289,16 +2389,6 @@ function requireTrustedOrigin(request, response, next) {
   }
 
   response.status(403).json({ message: "Untrusted request origin." });
-}
-
-function tokensMatch(expectedToken, submittedToken) {
-  if (!expectedToken || !submittedToken) {
-    return false;
-  }
-
-  const expected = Buffer.from(expectedToken);
-  const submitted = Buffer.from(submittedToken);
-  return expected.length === submitted.length && crypto.timingSafeEqual(expected, submitted);
 }
 
 function applySecurityHeaders(response) {
@@ -2635,13 +2725,11 @@ async function runCountdownAlertSweep() {
           ),
         );
       } catch (error) {
-        console.error(`Countdown alert failed for guild ${guild.id}.`);
-        console.error(error);
+        logger.error("countdown_alert_failed", { guildId: guild.id }, error);
       }
     }
   } catch (error) {
-    console.error("Countdown alert sweep failed.");
-    console.error(error);
+    logger.error("countdown_alert_sweep_failed", {}, error);
   } finally {
     countdownAlertSweepInFlight = false;
   }
@@ -2661,19 +2749,6 @@ function normalizeColor(value) {
   }
 
   return "#5865f2";
-}
-
-function normalizeReturnTo(value) {
-  const raw = String(value || "").trim();
-  if (!raw.startsWith("/")) {
-    return "/dashboard";
-  }
-
-  if (raw.startsWith("//")) {
-    return "/dashboard";
-  }
-
-  return raw;
 }
 
 function normalizeText(value, fallback, maxLength) {
@@ -2813,25 +2888,57 @@ function resolveAuthPopupStaticDir() {
   return "";
 }
 
-async function start() {
-  const server = app.listen(config.port, () => {
-    console.log(`Control center running at ${config.baseUrl}`);
+let discordLoginInFlight = false;
+let discordLoginRetryTimer = null;
+
+async function loginDiscordWithRetry() {
+  if (discordLoginInFlight || client.isReady()) {
+    return;
+  }
+
+  discordLoginInFlight = true;
+  try {
+    await client.login(config.token);
+    if (discordLoginRetryTimer) {
+      clearTimeout(discordLoginRetryTimer);
+      discordLoginRetryTimer = null;
+    }
+  } catch (error) {
+    logger.error("discord_login_failed", {}, error);
+    if (!discordLoginRetryTimer) {
+      discordLoginRetryTimer = setTimeout(() => {
+        discordLoginRetryTimer = null;
+        void loginDiscordWithRetry();
+      }, DISCORD_LOGIN_RETRY_MS);
+    }
+  } finally {
+    discordLoginInFlight = false;
+  }
+}
+
+async function start({ host = "127.0.0.1", login = true, port = config.port } = {}) {
+  const server = app.listen(port, host, () => {
+    logger.info("http_server_started", {
+      baseUrl: config.baseUrl,
+      port,
+      trustProxy: config.trustProxy,
+    });
   });
 
   registerShutdownHandlers(server);
-
-  try {
-    await client.login(config.token);
-  } catch (error) {
-    await new Promise((resolve) => server.close(resolve));
-    throw error;
+  if (login === true) {
+    void loginDiscordWithRetry();
+  } else if (typeof login === "function") {
+    Promise.resolve()
+      .then(login)
+      .catch((error) => logger.error("discord_login_failed", {}, error));
   }
+  return server;
 }
 
 if (require.main === module) {
   start().catch((error) => {
-    console.error("Failed to start app.");
-    console.error(error);
+    logger.error("application_start_failed", {}, error);
     process.exit(1);
   });
 }
@@ -2845,7 +2952,7 @@ function registerShutdownHandlers(server) {
     }
 
     shuttingDown = true;
-    console.log(`Received ${signal}; shutting down.`);
+    logger.info("shutdown_started", { signal });
 
     stopCountdownAlertScheduler();
     stopAntiRaidTracking();
@@ -2853,6 +2960,10 @@ function registerShutdownHandlers(server) {
     if (commandRegistrationRetryTimer) {
       clearTimeout(commandRegistrationRetryTimer);
       commandRegistrationRetryTimer = null;
+    }
+    if (discordLoginRetryTimer) {
+      clearTimeout(discordLoginRetryTimer);
+      discordLoginRetryTimer = null;
     }
 
     await new Promise((resolve) => {

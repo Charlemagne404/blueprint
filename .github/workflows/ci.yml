@@ -46,3 +46,4 @@ jobs:
           DISCORD_TOKEN: ci-placeholder-token
           DISCORD_CLIENT_ID: "123456789012345678"
           DISCORD_SESSION_SECRET: ci-placeholder-session-secret-at-least-32-chars
+          VANGUARD_BACKEND_API_KEY: ci-placeholder-vanguard-key

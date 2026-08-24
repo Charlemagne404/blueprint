@@ -90,6 +90,11 @@ class SqliteSessionStore extends session.Store {
     this.pruneStatement.run(Date.now());
   }
 
+  checkHealth() {
+    this.db.prepare("SELECT 1").get();
+    return true;
+  }
+
   close() {
     this.db.close();
   }

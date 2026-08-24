@@ -62,7 +62,10 @@ function renderLayout({
     ...schema,
   ]);
   const authButton = sessionUser
-    ? `<a class="button button-ghost" href="/logout">Log out</a>`
+    ? `<form class="inline-form" method="post" action="/logout">
+        <input type="hidden" name="_csrf" value="${escapeHtml(authConfig.csrfToken || "")}" />
+        <button class="button button-ghost" type="submit">Log out</button>
+      </form>`
     : `<button class="button button-ghost" id="login-button" type="button">Continue with Continental ID</button>`;
 
   const authMeta = sessionUser

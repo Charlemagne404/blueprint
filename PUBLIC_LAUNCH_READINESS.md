@@ -2,7 +2,7 @@
 
 **Decision rule:** Blueprint is not ready for a public launch until every launch-blocking item in this document is checked, evidence is attached or linked, and the final go/no-go review is recorded. A green local test run is necessary but not sufficient.
 
-**Last reviewed:** 2026-08-23
+**Last reviewed:** 2026-08-24
 **Current recommendation:** NO-GO for public launch; suitable for controlled private beta after live-server validation.
 
 ## How to use this checklist
@@ -17,8 +17,8 @@
 
 These are useful signals from the current checkout, but they do not prove production readiness:
 
-- [x] `npm test` passes: 51 tests.
-- [x] JavaScript syntax checks pass for the application and changed runtime files.
+- [x] `npm test` passes: 59 tests.
+- [x] JavaScript syntax checks pass for the application, scripts, and runtime files (55 files).
 - [x] `npm audit --omit=dev --audit-level=moderate` reports zero vulnerabilities.
 - [x] `git diff --check` passes.
 - [x] Express smoke coverage verifies `/healthz` and `/readyz` without a Discord login.
@@ -28,6 +28,24 @@ These are useful signals from the current checkout, but they do not prove produc
 - [x] The bot invite no longer requests Administrator; the generated permissions must still be verified in Discord before launch.
 - [ ] The current worktree is clean, reviewed, committed, and reproducible from a fresh checkout.
 - [ ] A real Discord test server, production deployment, external auth service, and AI service have completed the acceptance matrix below.
+
+### Repository controls completed in the 2026-08-24 readiness pass
+
+These controls are covered by the local test suite and are not substitutes for live-service
+acceptance:
+
+- [x] HTTP startup keeps `/healthz` available when Discord login fails; `/readyz` stays non-ready until Discord, control-center SQLite, and session SQLite are ready.
+- [x] Logout is POST-only for state changes, requires the session CSRF token, and clears the session cookie; return paths reject external, backslash, and control-character values.
+- [x] Production configuration rejects insecure auth APIs, malformed trusted login origins, and a missing `VANGUARD_BACKEND_API_KEY` when AI/resolution integration is enabled; configuration output strips URL credentials and query strings.
+- [x] Application runtime logs use bounded JSON events with redaction for credentials, cookies, API keys, session values, prompts, and token-like values.
+- [x] SQLite online backup and isolated restore verification cover both `control-center.db` and `sessions.db`; see `OPERATIONS.md`.
+- [x] `npm test` runs cleanly with the repository's `.env` present because the app smoke test explicitly uses a test environment.
+
+### Repository-level evidence captured on 2026-08-24
+
+- The readiness commit for this pass contains the controls above and excludes runtime databases, logs, backups, `.env`, and dependency directories.
+- A fresh detached checkout at the readiness commit completed `npm ci`, syntax checks for 55 files, all 59 tests, a high-severity production dependency audit with zero vulnerabilities, and production configuration-shape validation with non-secret CI values.
+- The backup test created and verified isolated copies of both SQLite databases; the live-data backup command was also exercised against the local runtime databases without modifying them.
 
 ### Repository-level evidence captured on 2026-08-23
 
@@ -96,7 +114,7 @@ For every module below, verify all of the following where applicable:
 - [ ] **Automations:** member-join, keyword, and suggestion-created triggers; send-message, real-ticket, and assign-role actions; cooldowns; missing member context; and dependent Tickets / Auto role configuration are verified.
 - [ ] **Modmail:** inbound DMs, durable forwarded-message mapping, role-gated staff replies, replies after restart, disabled DMs, attachments, multiple servers, and disabled/missing inboxes are verified. Confirm that staff cannot reply from an unrelated channel or without the configured role/server-management permission.
 - [ ] **Applications:** modal limits, prompt ordering, required answers, reviewer routing, mention safety, missing destination/role, and repeated submissions are verified.
-- [ ] **AI tools:** channel gating, mention gating, Continental ID linkage, banned/unlinked accounts, provider timeout/error, session reset, history isolation by guild/channel/user, message length limits, and service-unavailable behavior are verified. Decide explicitly whether AI is enabled for public launch or disabled by default.
+- [ ] **AI tools:** channel gating, mention gating, Continental ID linkage, banned/unlinked accounts, provider timeout/error, session reset, history isolation by guild/channel/user, message length limits, and service-unavailable behavior are verified. **Launch decision recorded:** AI is disabled by default and requires explicit per-server enablement plus the configured external access policy.
 
 ### 3. Authentication, authorization, and security
 

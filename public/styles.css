@@ -163,6 +163,10 @@ code {
   gap: 12px;
 }
 
+.inline-form {
+  margin: 0;
+}
+
 .topbar-nav,
 .site-footer-nav {
   display: flex;

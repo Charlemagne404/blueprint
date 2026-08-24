@@ -9,6 +9,9 @@
 - Added a production configuration checker and repository-wide JavaScript syntax checker.
 - Pinned the documented production Node.js runtime to `22.23.2` with `.nvmrc`.
 - Added the deployment and rollback runbook in `OPERATIONS.md`.
+- Kept the HTTP health surface available during Discord login failures and made readiness cover both control-center and session storage.
+- Added CSRF-protected POST logout, explicit reverse-proxy trust configuration, redacted JSON application logs, and security regression tests.
+- Added SQLite online-backup and isolated restore-verification commands for `control-center.db` and `sessions.db`.
 
 ### Compatibility and data notes
 
