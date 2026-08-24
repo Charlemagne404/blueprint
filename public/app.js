@@ -1949,6 +1949,83 @@
       .replaceAll("'", "&#39;");
   }
 
+  function bindLandingMotion() {
+    const landingPage = document.querySelector(".landing-page");
+    if (!landingPage) {
+      return;
+    }
+
+    const revealGroups = [
+      Array.from(landingPage.querySelectorAll(".landing-intro > *")),
+      Array.from(landingPage.querySelectorAll(".landing-capability-card")),
+      Array.from(landingPage.querySelectorAll(".landing-workflow-copy > *, .landing-steps li")),
+      Array.from(landingPage.querySelectorAll(".landing-module-heading > *, .landing-module-list span")),
+      Array.from(landingPage.querySelectorAll(".landing-closing > *:not(.landing-closing-glow)")),
+    ];
+    const revealItems = revealGroups.flat();
+    const prefersReducedMotion = typeof window.matchMedia === "function"
+      && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+    landingPage.classList.add("landing-motion-ready");
+    revealGroups.forEach((group) => {
+      group.forEach((item, index) => {
+        item.classList.add("landing-reveal");
+        item.style.setProperty("--landing-reveal-delay", `${Math.min(index * 70, 420)}ms`);
+      });
+    });
+
+    const reveal = (item) => item.classList.add("is-visible");
+    if (prefersReducedMotion || typeof window.IntersectionObserver !== "function") {
+      revealItems.forEach(reveal);
+    } else {
+      const observer = new window.IntersectionObserver((entries, activeObserver) => {
+        entries.forEach((entry) => {
+          if (!entry.isIntersecting) {
+            return;
+          }
+
+          reveal(entry.target);
+          activeObserver.unobserve(entry.target);
+        });
+      }, {
+        rootMargin: "0px 0px -8% 0px",
+        threshold: 0.14,
+      });
+
+      revealItems.forEach((item) => observer.observe(item));
+    }
+
+    if (prefersReducedMotion || typeof window.matchMedia !== "function") {
+      return;
+    }
+
+    const supportsPointerTilt = window.matchMedia("(hover: hover) and (pointer: fine)").matches;
+    const scene = landingPage.querySelector(".landing-console");
+    const consoleWindow = scene?.querySelector(".console-window");
+    if (!supportsPointerTilt || !scene || !consoleWindow) {
+      return;
+    }
+
+    scene.addEventListener("pointermove", (event) => {
+      if (event.pointerType === "touch") {
+        return;
+      }
+
+      const bounds = scene.getBoundingClientRect();
+      const horizontal = (event.clientX - bounds.left) / bounds.width - 0.5;
+      const vertical = (event.clientY - bounds.top) / bounds.height - 0.5;
+      consoleWindow.style.setProperty("--console-tilt-x", `${(horizontal * 6).toFixed(2)}deg`);
+      consoleWindow.style.setProperty("--console-tilt-y", `${(vertical * -5).toFixed(2)}deg`);
+      scene.classList.add("is-pointer-active");
+    });
+
+    scene.addEventListener("pointerleave", () => {
+      consoleWindow.style.setProperty("--console-tilt-x", "0deg");
+      consoleWindow.style.setProperty("--console-tilt-y", "0deg");
+      scene.classList.remove("is-pointer-active");
+    });
+  }
+
   async function handleAuthComplete() {
     const marker = document.querySelector("[data-auth-complete='true']");
     if (!marker) {
@@ -1971,6 +2048,7 @@
     }
   }
 
+  bindLandingMotion();
   bindLoginButtons();
   bindLinkDiscordButton();
   bindModuleCards();

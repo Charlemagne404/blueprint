@@ -61,7 +61,9 @@ function renderLayout({
     }),
     ...schema,
   ]);
-  const authButton = sessionUser
+  const authButton = currentPath === "/"
+    ? `<a class="button button-control-link" href="/dashboard">Open Control Center</a>`
+    : sessionUser
     ? `<form class="inline-form" method="post" action="/logout">
         <input type="hidden" name="_csrf" value="${escapeHtml(authConfig.csrfToken || "")}" />
         <button class="button button-ghost" type="submit">Log out</button>
@@ -79,7 +81,15 @@ function renderLayout({
       </div>`
     : "";
 
-  const topbarNav = `
+  const topbarNav = currentPath === "/"
+    ? `
+    <nav class="topbar-nav topbar-nav-landing" aria-label="Primary">
+      <a href="#capabilities">Capabilities</a>
+      <a href="#modules">Modules</a>
+      <a href="#workflow">How it works</a>
+    </nav>
+  `
+    : `
     <nav class="topbar-nav" aria-label="Primary">
       <a href="/">Home</a>
       <a href="/privacy">Privacy</a>
@@ -400,127 +410,66 @@ function renderOnboardingStats(onboardingState) {
 }
 
 function renderHome({ addBotUrl, authConfig, guilds = [], sessionUser }) {
-  const attentionServers = guilds.filter((guild) => guild.attentionCount > 0).length;
-  const onboardingState = getDashboardOnboardingState({
-    addBotUrl,
-    attentionServers,
-    discordLinked: Boolean(sessionUser?.discordLinked),
-    guildCount: guilds.length,
-    sessionUser,
-  });
-
   const body = `
-    <main class="hero home-page" id="main-content">
-      <section class="hero-copy">
-        <p class="eyebrow">Dashboard-first Discord control center</p>
-        <h1>${escapeHtml(onboardingState.headline)}</h1>
-        <p class="lede">${escapeHtml(onboardingState.lede)}</p>
-        <div class="hero-actions">
-          ${renderDashboardAction(onboardingState.primaryAction)}
-          ${renderDashboardAction(onboardingState.secondaryAction)}
-        </div>
-        <section class="settings-card onboarding-panel onboarding-panel-home">
-          <div class="onboarding-panel-copy">
-            <p class="eyebrow">Next required step</p>
-            <h2>${escapeHtml(onboardingState.progressLabel)}</h2>
-            <p class="card-copy">${escapeHtml(onboardingState.progressText)}</p>
-            ${renderOnboardingStats(onboardingState)}
+    <main class="landing-page" id="main-content">
+      <section class="landing-hero" aria-labelledby="landing-title">
+        <div class="landing-hero-copy">
+          <div class="landing-eyebrow"><span class="landing-pulse" aria-hidden="true"></span> Dashboard-first Discord control</div>
+          <h1 id="landing-title">Your server has its own <em>blueprint.</em></h1>
+          <p class="landing-lede">Blueprint brings the systems that keep a community moving into one considered control center. Enable what fits, configure it your way, and leave the rest out of sight.</p>
+          <div class="landing-actions">
+            <a class="button landing-primary-action" href="/dashboard">Open Control Center <span aria-hidden="true">→</span></a>
+            <a class="landing-text-link" href="#capabilities">See what it can do <span aria-hidden="true">↓</span></a>
           </div>
-          <ol class="onboarding-checklist">
-            ${renderOnboardingSteps(onboardingState)}
-          </ol>
-        </section>
-        <div class="hero-metrics">
-          <article class="hero-metric">
-            <span class="hero-metric-label">Built for</span>
-            <strong class="hero-metric-value">Modular server control</strong>
-            <p class="hero-metric-copy">Turn modules on only where they belong and keep every server configurable.</p>
-          </article>
-          <article class="hero-metric">
-            <span class="hero-metric-label">Primary workflow</span>
-            <strong class="hero-metric-value">Dashboard first</strong>
-            <p class="hero-metric-copy">Use slash commands for quick actions while major setup stays visual and centralized.</p>
-          </article>
-          <article class="hero-metric">
-            <span class="hero-metric-label">Operator focus</span>
-            <strong class="hero-metric-value">Fast setup triage</strong>
-            <p class="hero-metric-copy">Spot unfinished modules quickly, jump into a server, and continue setup without guesswork.</p>
-          </article>
-        </div>
-        <div class="hero-search-copy">
-          <p>
-            Blueprint is a Discord server management website for teams that want modular tools,
-            cleaner setup, and a premium dashboard instead of command-heavy administration.
-          </p>
-        </div>
-      </section>
-      <section class="panel brand-panel">
-        <div class="brand-panel-header">
-          <img
-            class="brand-panel-banner"
-            src="/images/Blueprint-banner.png"
-            alt="Blueprint"
-          />
-          <div class="brand-panel-signature">
-            <img src="/images/C2-new-white.png" alt="" aria-hidden="true" />
-            <span>Built by Continental</span>
+          <div class="landing-trust-row" aria-label="Blueprint principles">
+            <span>Modular by design</span><span>Built for real teams</span><span>One server at a time</span>
           </div>
         </div>
-        <p class="brand-panel-copy">
-          Blueprint is Continental’s dashboard-first Discord control center: modular,
-          polished, and designed to stay out of the way until you need it.
-        </p>
-        <div class="info-card-grid">
-          <section class="info-card">
-            <h2>What you can manage</h2>
-            <ul class="feature-list">
-              <li>Welcome flows and join roles</li>
-              <li>Shared countdowns and daily alerts</li>
-              <li>Audit feeds and moderation rules</li>
-              <li>Announcements, suggestions, highlights, and screening</li>
-            </ul>
-          </section>
-          <section class="info-card">
-            <h2>How access works</h2>
-            <ol class="feature-list feature-list-ordered">
-              <li>Continue with Continental ID</li>
-              <li>Use the Discord account linked to that identity</li>
-              <li>Manage only the servers where Blueprint is installed and you have rights</li>
-            </ol>
-          </section>
+        <div class="landing-console" aria-label="Blueprint Control Center preview">
+          <div class="console-orbit console-orbit-one" aria-hidden="true"></div>
+          <div class="console-orbit console-orbit-two" aria-hidden="true"></div>
+          <div class="console-window">
+            <div class="console-sidebar">
+              <div class="console-brand-mark"><img src="/images/blueprint-pfp2.png" alt="" /></div>
+              <span class="console-sidebar-dot is-active"></span><span class="console-sidebar-dot"></span><span class="console-sidebar-dot"></span>
+            </div>
+            <div class="console-main">
+              <div class="console-topline"><div><span class="console-kicker">Control center</span><strong>Northstar Community</strong></div><span class="console-avatar">NC</span></div>
+              <div class="console-overview"><div><span>Server overview</span><strong>Everything in order.</strong></div><span class="console-ready"><i></i> Ready</span></div>
+              <div class="console-cards">
+                <article class="console-module"><span class="console-module-icon icon-shield">⌁</span><div><strong>Moderation</strong><small>Safeguards are active</small></div><b>On</b></article>
+                <article class="console-module"><span class="console-module-icon icon-spark">✦</span><div><strong>Welcome</strong><small>A warm first hello</small></div><b>On</b></article>
+                <article class="console-module"><span class="console-module-icon icon-ticket">□</span><div><strong>Tickets</strong><small>Ready when needed</small></div><b>On</b></article>
+              </div>
+              <div class="console-activity"><span class="console-activity-line"></span><span>Reviewing the details, without losing the bigger picture.</span></div>
+            </div>
+          </div>
         </div>
       </section>
-      <section class="settings-card content-card home-section">
-        <p class="eyebrow">Core capabilities</p>
-        <h2>One control center, many installable Discord modules.</h2>
-        <p>
-          Blueprint is built for communities that need structured Discord bot management without
-          forcing every change through slash commands. Modules can be enabled per server, configured
-          independently, and left hidden when unused.
-        </p>
-        <div class="info-card-grid">
-          <article class="info-card">
-            <h3>Moderation and safety</h3>
-            <p>Configure audit logs, anti-raid rules, join screening, automod, and staff workflows from the dashboard.</p>
-          </article>
-          <article class="info-card">
-            <h3>Community operations</h3>
-            <p>Manage welcome flows, tickets, reaction roles, suggestions, announcements, applications, and modmail.</p>
-          </article>
-          <article class="info-card">
-            <h3>Server customization</h3>
-            <p>Keep each guild separate with its own channels, roles, permissions, messages, and module states.</p>
-          </article>
-        </div>
+
+      <section class="landing-intro" id="capabilities" aria-labelledby="capabilities-title">
+        <div><p class="landing-section-kicker">A calmer way to run Discord</p><h2 id="capabilities-title">The work behind a great community should feel this clear.</h2></div>
+        <p>Blueprint keeps complex server systems organized into focused modules—so your team can see what is running, understand why, and adjust it without digging through commands.</p>
       </section>
-      <section class="settings-card content-card home-section">
-        <p class="eyebrow">Why it ranks</p>
-        <h2>A public website layer on top of an authenticated dashboard.</h2>
-        <p>
-          The public pages explain what Blueprint is, how it works, and how access is handled.
-          Private dashboard pages stay excluded from search indexing, while the public pages carry
-          the metadata, crawl files, and structured content needed for discoverability.
-        </p>
+
+      <section class="landing-capability-grid" aria-label="Blueprint capabilities">
+        <article class="landing-capability-card capability-safety"><span class="capability-number">01</span><div class="capability-symbol">⌁</div><h3>Keep the room steady.</h3><p>Moderation, anti-raid protection, audit logs, and join screening give your team a composed place to respond.</p><span class="capability-foot">Safety &amp; oversight</span></article>
+        <article class="landing-capability-card capability-community"><span class="capability-number">02</span><div class="capability-symbol">✦</div><h3>Make people feel expected.</h3><p>Welcome flows, reaction roles, announcements, applications, and suggestions help a server feel designed for its members.</p><span class="capability-foot">Community systems</span></article>
+        <article class="landing-capability-card capability-operations"><span class="capability-number">03</span><div class="capability-symbol">↗</div><h3>Give operations a home.</h3><p>Tickets, modmail, automations, leveling, and AI tools stay close at hand without crowding the parts you do not use.</p><span class="capability-foot">Staff workflows</span></article>
+      </section>
+
+      <section class="landing-workflow" id="workflow" aria-labelledby="workflow-title">
+        <div class="landing-workflow-copy"><p class="landing-section-kicker">A control center, not a command maze</p><h2 id="workflow-title">Built around the way teams actually work.</h2><p>Use Discord for the moments that need a fast response. Use Blueprint when the job is to shape a system thoughtfully. Each server has its own settings, permissions, messages, channels, and modules.</p><a class="landing-inline-action" href="/dashboard">Take me to the Control Center <span aria-hidden="true">→</span></a></div>
+        <ol class="landing-steps"><li><span>01</span><div><strong>Choose your building blocks</strong><p>Enable only the modules your community needs.</p></div></li><li><span>02</span><div><strong>Make them yours</strong><p>Set roles, channels, copy, and permissions per server.</p></div></li><li><span>03</span><div><strong>Keep a clear view</strong><p>Return to one dashboard as your community evolves.</p></div></li></ol>
+      </section>
+
+      <section class="landing-modules" id="modules" aria-labelledby="modules-title">
+        <div class="landing-module-heading"><p class="landing-section-kicker">Built in modules</p><h2 id="modules-title">One bot. Exactly the right amount of help.</h2></div>
+        <div class="landing-module-list" aria-label="Available Blueprint modules"><span>Welcome</span><span>Auto roles</span><span>Audit log</span><span>Auto moderation</span><span>Join screening</span><span>Announcements</span><span>Starboard</span><span>Suggestions</span><span>Reaction roles</span><span>Tickets</span><span>Leveling</span><span>Anti-raid</span><span>Automations</span><span>Modmail</span><span>Applications</span><span>AI tools</span></div>
+      </section>
+
+      <section class="landing-closing" aria-labelledby="closing-title">
+        <div class="landing-closing-glow" aria-hidden="true"></div><p class="landing-section-kicker">Your community, on your terms</p><h2 id="closing-title">Give your server a better place to grow.</h2><p>Start in the Control Center and build the setup that makes sense for your community.</p><a class="button landing-primary-action" href="/dashboard">Open Control Center <span aria-hidden="true">→</span></a>
       </section>
     </main>
   `;
@@ -530,8 +479,8 @@ function renderHome({ addBotUrl, authConfig, guilds = [], sessionUser }) {
     body,
     currentPath: "/",
     description:
-      "Blueprint is a modular Discord bot control center with a dashboard-first workflow for moderation, automations, welcome flows, tickets, and server operations.",
-    pageHeading: "Run Blueprint from one polished server dashboard.",
+      "Blueprint is a modular, dashboard-first Discord bot for configuring moderation, community systems, automations, tickets, and server operations with clarity.",
+    pageHeading: "Your server has its own blueprint.",
     schema: [buildSoftwareApplicationSchema()],
     sessionUser,
     title: "Discord Server Control Center",
