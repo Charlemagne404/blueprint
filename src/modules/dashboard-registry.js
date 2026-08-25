@@ -36,6 +36,26 @@ const RUNTIME_UNAVAILABLE_MODULES = Object.freeze({});
 
 const MODULE_ENABLEMENT_KEYS = Object.freeze({});
 
+const DASHBOARD_MODULE_KEYS = Object.freeze([
+  "countdown",
+  "welcome",
+  "autoRole",
+  "auditLog",
+  "autoModeration",
+  "joinScreening",
+  "announcements",
+  "starboard",
+  "suggestions",
+  "reactionRoles",
+  "tickets",
+  "leveling",
+  "antiRaid",
+  "automations",
+  "modmail",
+  "applications",
+  "aiTools",
+]);
+
 function evaluateDashboardModules({
   settings,
   guild,
@@ -332,6 +352,7 @@ function evaluateDashboardModules({
 }
 
 module.exports = {
+  DASHBOARD_MODULE_KEYS,
   evaluateDashboardModules,
   getRuntimeModuleValidationErrors,
 };

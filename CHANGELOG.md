@@ -4,6 +4,9 @@
 
 ### Launch-readiness hardening
 
+- Completed live dashboard setup diagnostics for all 17 modules, including cross-module
+  dependencies such as ticket and role automation actions, so edits update the issue queue
+  before saving.
 - Added configurable auth/dashboard rate limits, AI request cooldowns, bounded external
   response bodies, and correlation IDs for HTTP failures.
 - Added a token-protected `/metrics` endpoint with bounded latency, failure, module-task,

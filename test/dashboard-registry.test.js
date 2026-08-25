@@ -2,6 +2,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 
 const {
+  DASHBOARD_MODULE_KEYS,
   evaluateDashboardModules,
   getRuntimeModuleValidationErrors,
 } = require("../src/modules/dashboard-registry");
@@ -61,6 +62,16 @@ test("dashboard marks configured leveling and tickets modules live", () => {
   assert.equal(byKey.leveling.blocker, "");
   assert.equal(byKey.tickets.state, "live");
   assert.equal(byKey.tickets.blocker, "");
+});
+
+test("dashboard registry exposes every configured module in stable order", () => {
+  const modules = evaluateDashboardModules({ settings: {} });
+
+  assert.deepEqual(
+    modules.map((module) => module.key),
+    DASHBOARD_MODULE_KEYS,
+  );
+  assert.equal(new Set(DASHBOARD_MODULE_KEYS).size, DASHBOARD_MODULE_KEYS.length);
 });
 
 test("runtime validation only blocks modules with explicit runtime blockers", () => {

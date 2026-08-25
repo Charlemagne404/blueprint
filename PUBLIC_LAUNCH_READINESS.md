@@ -17,8 +17,8 @@
 
 ## Current local baseline
 
-- [x] `npm test` passes: 66 tests.
-- [x] JavaScript syntax checks pass for the application, scripts, and runtime files (61 files).
+- [x] `npm test` passes: 68 tests.
+- [x] JavaScript syntax checks pass for the application, scripts, and runtime files (62 files).
 - [x] `npm run check:secrets` scans tracked and non-ignored worktree text files for high-confidence credentials and non-placeholder secret assignments.
 - [x] `npm audit --omit=dev --audit-level=moderate` reports zero vulnerabilities.
 - [x] `git diff --check` passes.
@@ -49,7 +49,9 @@
 
 ### Repository-level evidence captured on 2026-08-25
 
-- The working tree passed `npm run check:secrets`, syntax checks for 61 files, and all 66 automated tests.
+- The working tree passed `npm run check:secrets`, syntax checks for 62 files, and all 68 automated tests.
+- Dashboard regression coverage verifies that all 17 server modules have matching live client
+  diagnostics and that their registry order remains stable.
 - The hardening tests cover rate-limit rejection, metrics rendering, oversized external responses, persisted cooldown recovery, modmail attachment bounds, and guild-scoped data deletion.
 - `deploy/blueprint.service`, `deploy/blueprint-backup.service`, and `deploy/blueprint-backup.timer` provide bounded service and backup templates.
 - `RELEASE_EVIDENCE_TEMPLATE.md` provides the repository evidence packet structure for the release record.

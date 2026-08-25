@@ -115,7 +115,7 @@ function getAutomationState(settings, channelOptions = []) {
 
 function renderAutomationModuleCard({ blockerText = "", channelOptions, defaultOpen = false, settings }) {
   const state = getAutomationState(settings, channelOptions);
-  const statusHtml = `<div class="status-pill status-pill-${state}">${escapeHtml(getStatusLabel(state))}</div>`;
+  const statusHtml = `<div class="status-pill status-pill-${state}" data-status-target="automations">${escapeHtml(getStatusLabel(state))}</div>`;
   const channelOptionsHtml = [
     `<option value="">Select a channel</option>`,
     ...channelOptions.map((channel) => `<option value="${escapeHtml(channel.id)}" ${settings.automationsLogChannelId === channel.id ? "selected" : ""}>${escapeHtml(channel.label)}</option>`),

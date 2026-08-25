@@ -652,6 +652,46 @@
         incomplete: "Needs setup",
         live: "Live",
       },
+      reactionRoles: {
+        disabled: "Disabled",
+        incomplete: "Needs setup",
+        live: "Live",
+      },
+      tickets: {
+        disabled: "Disabled",
+        incomplete: "Needs setup",
+        live: "Live",
+      },
+      leveling: {
+        disabled: "Disabled",
+        incomplete: "Needs setup",
+        live: "Live",
+      },
+      antiRaid: {
+        disabled: "Disabled",
+        incomplete: "Needs setup",
+        live: "Live",
+      },
+      automations: {
+        disabled: "Disabled",
+        incomplete: "Needs setup",
+        live: "Live",
+      },
+      modmail: {
+        disabled: "Disabled",
+        incomplete: "Needs setup",
+        live: "Live",
+      },
+      applications: {
+        disabled: "Disabled",
+        incomplete: "Needs setup",
+        live: "Live",
+      },
+      aiTools: {
+        disabled: "Disabled",
+        incomplete: "Needs setup",
+        live: "Live",
+      },
       welcome: {
         disabled: "Disabled",
         incomplete: "Needs setup",
@@ -878,6 +918,8 @@
     }
 
     function getDashboardState() {
+      // Keep the editing experience aligned with dashboard-registry. Server-side validation
+      // remains authoritative for permissions, hierarchy, and Discord API state.
       const countdownData = {
         alertChannelId: getValue("countdownAlertChannelId"),
         alertChannelLabel: getSelectedOptionLabel("countdownAlertChannelId", "Not selected"),
@@ -904,6 +946,14 @@
       const announcementsEnabled = isChecked("announcementsEnabled");
       const starboardEnabled = isChecked("starboardEnabled");
       const suggestionsEnabled = isChecked("suggestionsEnabled");
+      const reactionRolesEnabled = isChecked("reactionRolesEnabled");
+      const ticketsEnabled = isChecked("ticketsEnabled");
+      const levelingEnabled = isChecked("levelingEnabled");
+      const antiRaidEnabled = isChecked("antiRaidEnabled");
+      const automationsEnabled = isChecked("automationsEnabled");
+      const modmailEnabled = isChecked("modmailEnabled");
+      const applicationsEnabled = isChecked("applicationsEnabled");
+      const aiToolsEnabled = isChecked("aiToolsEnabled");
       const welcomeChannelId = getValue("welcomeChannelId");
       const welcomeMessage = getValue("welcomeMessageTemplate");
       const autoRoleRoleId = getValue("autoRoleRoleId");
@@ -923,6 +973,22 @@
       const announcementsChannelId = getValue("announcementsChannelId");
       const starboardChannelId = getValue("starboardChannelId");
       const suggestionsChannelId = getValue("suggestionsChannelId");
+      const reactionRolesChannelId = getValue("reactionRolesChannelId");
+      const reactionRolesMessageId = getValue("reactionRolesMessageId");
+      const reactionRolesRoleId = getValue("reactionRolesRoleId");
+      const ticketsIntakeChannelId = getValue("ticketsIntakeChannelId");
+      const levelingAnnounceChannelId = getValue("levelingAnnounceChannelId");
+      const antiRaidAlertChannelId = getValue("antiRaidAlertChannelId");
+      const automationsLogChannelId = getValue("automationsLogChannelId");
+      const automationsTrigger = getValue("automationsTrigger") || "member_join";
+      const automationsAction = getValue("automationsAction") || "send_message";
+      const automationsKeyword = getValue("automationsKeyword");
+      const modmailInboxChannelId = getValue("modmailInboxChannelId");
+      const modmailStaffRoleId = getValue("modmailStaffRoleId");
+      const applicationsChannelId = getValue("applicationsChannelId");
+      const applicationsReviewerRoleId = getValue("applicationsReviewerRoleId");
+      const applicationsQuestions = getValue("applicationsQuestions");
+      const aiToolsChannelId = getValue("aiToolsChannelId");
       const modules = {
         ...getStaticModuleState(),
         announcements: {
@@ -963,6 +1029,46 @@
         suggestions: {
           blocker: "",
           enabled: suggestionsEnabled,
+          state: "disabled",
+        },
+        reactionRoles: {
+          blocker: "",
+          enabled: reactionRolesEnabled,
+          state: "disabled",
+        },
+        tickets: {
+          blocker: "",
+          enabled: ticketsEnabled,
+          state: "disabled",
+        },
+        leveling: {
+          blocker: "",
+          enabled: levelingEnabled,
+          state: "disabled",
+        },
+        antiRaid: {
+          blocker: "",
+          enabled: antiRaidEnabled,
+          state: "disabled",
+        },
+        automations: {
+          blocker: "",
+          enabled: automationsEnabled,
+          state: "disabled",
+        },
+        modmail: {
+          blocker: "",
+          enabled: modmailEnabled,
+          state: "disabled",
+        },
+        applications: {
+          blocker: "",
+          enabled: applicationsEnabled,
+          state: "disabled",
+        },
+        aiTools: {
+          blocker: "",
+          enabled: aiToolsEnabled,
           state: "disabled",
         },
         welcome: {
@@ -1055,6 +1161,96 @@
         if (!suggestionsChannelId) {
           modules.suggestions.blocker = "Choose a suggestions channel to finish setup.";
           modules.suggestions.state = "incomplete";
+        }
+      }
+
+      if (reactionRolesEnabled) {
+        modules.reactionRoles.state = "live";
+        if (!reactionRolesChannelId || !reactionRolesMessageId || !reactionRolesRoleId) {
+          modules.reactionRoles.blocker = "Select a channel, setup message, and role to finish setup.";
+          modules.reactionRoles.state = "incomplete";
+        }
+      }
+
+      if (ticketsEnabled) {
+        modules.tickets.state = "live";
+        if (!ticketsIntakeChannelId) {
+          modules.tickets.blocker = "Select a ticket intake channel to finish setup.";
+          modules.tickets.state = "incomplete";
+        }
+      }
+
+      if (levelingEnabled) {
+        modules.leveling.state = "live";
+        if (!levelingAnnounceChannelId) {
+          modules.leveling.blocker = "Select a level-up announcement channel to finish setup.";
+          modules.leveling.state = "incomplete";
+        }
+      }
+
+      if (antiRaidEnabled) {
+        modules.antiRaid.state = "live";
+        if (!antiRaidAlertChannelId) {
+          modules.antiRaid.blocker = "Select an anti-raid alert channel to finish setup.";
+          modules.antiRaid.state = "incomplete";
+        }
+      }
+
+      if (automationsEnabled) {
+        modules.automations.state = "live";
+        if (!automationsLogChannelId) {
+          modules.automations.blocker = "Choose an automations log channel to finish setup.";
+          modules.automations.state = "incomplete";
+        } else if (automationsTrigger === "keyword" && !automationsKeyword) {
+          modules.automations.blocker = "Enter a keyword trigger phrase for your automation rule.";
+          modules.automations.state = "incomplete";
+        } else if (
+          automationsAction === "create_ticket" &&
+          (!ticketsEnabled || !ticketsIntakeChannelId)
+        ) {
+          modules.automations.blocker = "Enable and configure Tickets before using the Create ticket action.";
+          modules.automations.state = "incomplete";
+        } else if (
+          automationsAction === "assign_role" &&
+          (!autoRoleEnabled || !autoRoleRoleId)
+        ) {
+          modules.automations.blocker = "Enable and configure Auto role before using the Assign role action.";
+          modules.automations.state = "incomplete";
+        }
+      }
+
+      if (modmailEnabled) {
+        modules.modmail.state = "live";
+        if (!modmailInboxChannelId || !modmailStaffRoleId) {
+          modules.modmail.blocker = "Select an inbox channel and staff role to finish setup.";
+          modules.modmail.state = "incomplete";
+        }
+      }
+
+      if (applicationsEnabled) {
+        modules.applications.state = "live";
+        const promptCount = applicationsQuestions
+          .split(/\r?\n/)
+          .map((prompt) => prompt.trim())
+          .filter(Boolean)
+          .length;
+        if (promptCount === 0) {
+          modules.applications.blocker = "Add at least one application prompt before enabling this module.";
+          modules.applications.state = "incomplete";
+        } else if (promptCount > 5) {
+          modules.applications.blocker = "Applications support up to 5 prompts so they fit the Discord modal flow.";
+          modules.applications.state = "incomplete";
+        } else if (!applicationsChannelId || !applicationsReviewerRoleId) {
+          modules.applications.blocker = "Select a destination channel and reviewer role to finish setup.";
+          modules.applications.state = "incomplete";
+        }
+      }
+
+      if (aiToolsEnabled) {
+        modules.aiTools.state = "live";
+        if (!aiToolsChannelId) {
+          modules.aiTools.blocker = "Select a dedicated AI tools channel to finish setup.";
+          modules.aiTools.state = "incomplete";
         }
       }
 

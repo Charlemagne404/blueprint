@@ -74,7 +74,7 @@ function getModmailState(settings, channelOptions = [], roleOptions = []) {
 
 function renderModmailModuleCard({ blockerText = "", channelOptions, defaultOpen = false, roleOptions, settings }) {
   const state = getModmailState(settings, channelOptions, roleOptions);
-  const statusHtml = `<div class="status-pill status-pill-${state}">${escapeHtml(getStatusLabel(state))}</div>`;
+  const statusHtml = `<div class="status-pill status-pill-${state}" data-status-target="modmail">${escapeHtml(getStatusLabel(state))}</div>`;
   const channelOptionsHtml = [
     `<option value="">Select a channel</option>`,
     ...channelOptions.map((channel) => `<option value="${escapeHtml(channel.id)}" ${settings.modmailInboxChannelId === channel.id ? "selected" : ""}>${escapeHtml(channel.label)}</option>`),

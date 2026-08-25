@@ -89,7 +89,7 @@ function getApplicationState(settings, channelOptions = [], roleOptions = []) {
 
 function renderApplicationsModuleCard({ blockerText = "", channelOptions, defaultOpen = false, roleOptions, settings }) {
   const state = getApplicationState(settings, channelOptions, roleOptions);
-  const statusHtml = `<div class="status-pill status-pill-${state}">${escapeHtml(getStatusLabel(state))}</div>`;
+  const statusHtml = `<div class="status-pill status-pill-${state}" data-status-target="applications">${escapeHtml(getStatusLabel(state))}</div>`;
   const channelOptionsHtml = [
     `<option value="">Select a channel</option>`,
     ...channelOptions.map((channel) => `<option value="${escapeHtml(channel.id)}" ${settings.applicationsChannelId === channel.id ? "selected" : ""}>${escapeHtml(channel.label)}</option>`),
