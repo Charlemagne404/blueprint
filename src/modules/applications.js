@@ -5,6 +5,7 @@ const {
   getRoleLabel,
   normalizeId,
   normalizeText,
+  splitTextIntoChunks,
 } = require("./common");
 
 const defaults = {
@@ -149,6 +150,7 @@ function renderApplicationsModuleCard({ blockerText = "", channelOptions, defaul
 }
 
 module.exports = {
+  buildApplicationSubmissionMessages,
   defaults,
   getApplicationState,
   getApplicationPrompts,
@@ -177,4 +179,40 @@ function getApplicationPrompts(settings = {}) {
     .split(/\r?\n/)
     .map((entry) => entry.trim())
     .filter(Boolean);
+}
+
+function buildApplicationSubmissionMessages({
+  answers = [],
+  reviewerRoleId = "",
+  title = "Application",
+  userId = "",
+  userTag = "",
+} = {}) {
+  const submitter = userId ? `<@${userId}>` : userTag || "Unknown member";
+  const answerLines = answers.flatMap(({ prompt, answer }) => [
+    `**${String(prompt || "Question").trim()}**`,
+    String(answer || "(no answer)").trim() || "(no answer)",
+    "",
+  ]);
+  const chunks = splitTextIntoChunks(answerLines.join("\n"), 1700);
+  const safeChunks = chunks.length > 0 ? chunks : ["(No answers provided)"];
+
+  return safeChunks.map((chunk, index) => ({
+    allowedMentions: {
+      parse: [],
+      roles: index === 0 && reviewerRoleId ? [reviewerRoleId] : [],
+      users: index === 0 && userId ? [userId] : [],
+    },
+    content: [
+      index === 0
+        ? `**${String(title || "Application").trim()}**`
+        : `**${String(title || "Application").trim()} (continued, part ${index + 1})**`,
+      index === 0 ? `Submitted by: ${submitter}` : "",
+      index === 0 && reviewerRoleId ? `Reviewer role: <@&${reviewerRoleId}>` : "",
+      "",
+      chunk,
+    ]
+      .filter(Boolean)
+      .join("\n"),
+  }));
 }

@@ -76,3 +76,43 @@ test("automod leaves clean messages alone", async () => {
     reasons: [],
   });
 });
+
+test("automod does not claim a timeout succeeded when Discord rejects it", async () => {
+  const result = await moderateMessage(
+    {
+      author: { bot: false, id: "user-1", tag: "Member#0001" },
+      channelId: "channel-1",
+      content: "this contains a blocked phrase",
+      deletable: false,
+      guild: {
+        channels: { cache: new Map() },
+        members: { fetchMe: async () => null, me: null },
+      },
+      member: {
+        moderatable: true,
+        permissions: { has: () => false },
+        timeout: async () => {
+          throw new Error("missing permission");
+        },
+      },
+      mentions: {
+        roles: { size: 0 },
+        users: { size: 0 },
+      },
+    },
+    {
+      autoModerationEnabled: true,
+      autoModerationBlockedWords: ["blocked phrase"],
+      autoModerationBlockInvites: false,
+      autoModerationLogChannelId: "",
+      autoModerationMentionLimit: 0,
+      autoModerationTimeoutMinutes: 10,
+    },
+  );
+
+  assert.deepEqual(result, {
+    moderated: true,
+    reasons: ["blocked phrase"],
+    timedOut: false,
+  });
+});

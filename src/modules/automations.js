@@ -18,6 +18,7 @@ const defaults = {
   automationsTrigger: "member_join",
   automationsAction: "send_message",
   automationsKeyword: "",
+  automationsMessage: "Automation fired: {source}.",
   automationsCooldownSeconds: 60,
 };
 
@@ -28,6 +29,11 @@ function normalizeAutomationSettings(input = {}) {
     automationsTrigger: normalizeOption(input.automationsTrigger, AUTOMATION_TRIGGERS, "member_join"),
     automationsAction: normalizeOption(input.automationsAction, AUTOMATION_ACTIONS, "send_message"),
     automationsKeyword: normalizeText(input.automationsKeyword, "", 80),
+    automationsMessage: normalizeText(
+      input.automationsMessage,
+      defaults.automationsMessage,
+      240,
+    ),
     automationsCooldownSeconds: normalizeInteger(input.automationsCooldownSeconds, 60, 0, 3600),
   };
 }
@@ -133,11 +139,11 @@ function renderAutomationModuleCard({ blockerText = "", channelOptions, defaultO
           <div class="field-grid">
             <label>
               <span>Trigger</span>
-              <select name="automationsTrigger">${AUTOMATION_TRIGGERS.map((trigger) => `<option value="${trigger}" ${settings.automationsTrigger === trigger ? "selected" : ""}>${escapeHtml(readableTrigger(trigger))}</option>`).join("")}</select>
+              <select name="automationsTrigger" data-automation-trigger>${AUTOMATION_TRIGGERS.map((trigger) => `<option value="${trigger}" ${settings.automationsTrigger === trigger ? "selected" : ""}>${escapeHtml(readableTrigger(trigger))}</option>`).join("")}</select>
             </label>
             <label>
               <span>Action</span>
-              <select name="automationsAction">${AUTOMATION_ACTIONS.map((action) => `<option value="${action}" ${settings.automationsAction === action ? "selected" : ""}>${escapeHtml(readableAction(action))}</option>`).join("")}</select>
+              <select name="automationsAction" data-automation-action>${AUTOMATION_ACTIONS.map((action) => `<option value="${action}" ${settings.automationsAction === action ? "selected" : ""}>${escapeHtml(readableAction(action))}</option>`).join("")}</select>
             </label>
             <label>
               <span>Log channel</span>
@@ -147,9 +153,14 @@ function renderAutomationModuleCard({ blockerText = "", channelOptions, defaultO
               <span>Rule cooldown (seconds)</span>
               <input type="number" min="0" max="3600" name="automationsCooldownSeconds" value="${escapeHtml(String(settings.automationsCooldownSeconds))}" />
             </label>
-            <label class="module-field-wide ${settings.automationsTrigger === "keyword" ? "" : "is-hidden"}">
+            <label class="module-field-wide ${settings.automationsTrigger === "keyword" ? "" : "is-hidden"}" data-automation-keyword-field>
               <span>Keyword phrase</span>
               <input type="text" maxlength="80" name="automationsKeyword" value="${escapeHtml(settings.automationsKeyword)}" placeholder="hello team" />
+            </label>
+            <label class="module-field-wide ${settings.automationsAction === "send_message" ? "" : "is-hidden"}" data-automation-message-field>
+              <span>Message sent to the log channel</span>
+              <textarea name="automationsMessage" rows="3" maxlength="240" placeholder="Automation fired: {source}.">${escapeHtml(settings.automationsMessage)}</textarea>
+              <small>Use <code>{source}</code>, <code>{user}</code>, and <code>{mention}</code> when a member is available.</small>
             </label>
           </div>
         </div>
@@ -177,6 +188,7 @@ function renderAutomationModuleCard({ blockerText = "", channelOptions, defaultO
 module.exports = {
   defaults,
   getAutomationState,
+  getAutomationMessage,
   normalizeAutomationSettings,
   renderAutomationModuleCard,
   validateAutomationSettings,
@@ -210,4 +222,14 @@ function getPreview(settings, channelOptions, state) {
   }
 
   return `${readableTrigger(settings.automationsTrigger)} -> ${readableAction(settings.automationsAction)}. Cooldown ${settings.automationsCooldownSeconds}s. Logged to ${getChannelLabel(settings.automationsLogChannelId, channelOptions)}.`;
+}
+
+function getAutomationMessage(settings, payload = {}) {
+  const member = payload.member || payload.context?.member;
+  const user = member?.user || member;
+  const userId = member?.id || user?.id;
+  return String(settings.automationsMessage || defaults.automationsMessage)
+    .replaceAll("{source}", String(payload.source || "automation"))
+    .replaceAll("{user}", String(user?.username || user?.tag || user?.id || "member"))
+    .replaceAll("{mention}", userId ? `<@${userId}>` : "member");
 }

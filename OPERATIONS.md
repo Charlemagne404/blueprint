@@ -78,8 +78,12 @@ The current implementation has explicit bounded inputs and request controls:
 - AI questions are capped at 1,500 characters, Discord replies at 1,900 characters, history
   at 1–24 messages, and provider calls at the configured 2–120 second timeout. A user/channel
   cooldown is controlled by `AI_USER_COOLDOWN_SECONDS`.
-- Modmail and staff replies are capped at 1,800 characters. Ticket transcripts read at most
-  100 messages and are capped before delivery.
+- Modmail and staff replies are capped at 1,800 characters. Ticket transcripts page through at
+  most 500 recent messages and split the result into Discord-safe delivery messages.
+- Application submissions split long multi-question answers into Discord-safe messages, and
+  automation notices are capped at 240 configured characters before delivery.
+- Leveling updates are serialized per guild/member in the bot process to prevent concurrent
+  message events from overwriting XP; different members continue in parallel.
 - Ticket creation allows one tracked open ticket per member/server. Automation cooldowns are
   persisted in SQLite so a process restart does not erase an active cooldown.
 - The backup and guild-deletion commands refuse ambiguous output/target paths and require
@@ -138,7 +142,8 @@ restore time in the release evidence packet. Do not commit generated backup dire
    and any Discord permission or command changes.
 6. Start the service and verify health, readiness, public HTTPS, Discord login, and slash
    command registration.
-7. If a schema migration is ever introduced, follow its documented down/forward-compatibility
-   procedure rather than assuming a code rollback is sufficient.
+7. The current unreleased settings change adds an `automations_message` column with a safe
+   default. Verify the migration on a backup before rollback; the additive column is tolerated
+   by older code, but custom automation copy is only available on the newer version.
 
 Do not commit `.env`, databases, logs, backups, or generated runtime files.

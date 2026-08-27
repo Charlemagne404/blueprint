@@ -6,6 +6,8 @@ const {
   PermissionFlagsBits,
 } = require("discord.js");
 
+const { splitTextIntoChunks } = require("./common");
+
 const {
   clearTicketPanelState,
   closeTicketForChannel,
@@ -226,21 +228,19 @@ async function closeTicket(interaction, settings) {
     return "Only the ticket opener, support role, or server staff can close this ticket.";
   }
 
-  const transcript = await buildTranscript(interaction.channel);
   const transcriptChannel = settings.ticketsTranscriptChannelId
     ? interaction.guild.channels.cache.get(settings.ticketsTranscriptChannelId)
     : null;
 
   if (transcriptChannel && transcriptChannel.isTextBased()) {
-    await transcriptChannel.send({
-      allowedMentions: { parse: [] },
-      content: [
-        `🧾 Ticket closed from #${interaction.channel.name}`,
-        `Opened by: <@${ticket.userId}>`,
-        "",
-        transcript,
-      ].join("\n"),
-    }).catch(() => null);
+    const transcript = await buildTranscript(interaction.channel);
+    for (const payload of buildTicketTranscriptPayloads({
+      channelName: interaction.channel.name,
+      openerId: ticket.userId,
+      transcript,
+    })) {
+      await transcriptChannel.send(payload).catch(() => null);
+    }
   }
 
   try {
@@ -273,20 +273,80 @@ function memberCanCloseTicket(interaction, settings, ticket) {
   return false;
 }
 
-async function buildTranscript(channel) {
-  const messages = await channel.messages.fetch({ limit: 100 }).catch(() => null);
-  if (!messages) {
-    return "(Transcript unavailable)";
+async function buildTranscript(channel, { maxMessages = 500 } = {}) {
+  const boundedMaxMessages = Number.isInteger(maxMessages) && maxMessages > 0 ? maxMessages : 500;
+  const collected = [];
+  let before;
+
+  while (collected.length < boundedMaxMessages) {
+    const limit = Math.min(100, boundedMaxMessages - collected.length);
+    const options = { limit };
+    if (before) {
+      options.before = before;
+    }
+
+    const page = await channel.messages.fetch(options).catch(() => null);
+    if (!page) {
+      if (collected.length === 0) {
+        return "(Transcript unavailable)";
+      }
+      break;
+    }
+
+    const pageMessages = Array.from(typeof page.values === "function" ? page.values() : page);
+    if (pageMessages.length === 0) {
+      break;
+    }
+
+    collected.push(...pageMessages.slice(0, boundedMaxMessages - collected.length));
+    if (collected.length >= boundedMaxMessages || pageMessages.length < limit) {
+      break;
+    }
+
+    const oldestMessage = pageMessages.reduce((oldest, message) => {
+      if (!oldest) return message;
+      return (message.createdTimestamp || 0) < (oldest.createdTimestamp || 0) ? message : oldest;
+    }, null);
+    if (!oldestMessage?.id || oldestMessage.id === before) {
+      break;
+    }
+    before = oldestMessage.id;
   }
 
-  const lines = [...messages.values()]
-    .sort((left, right) => left.createdTimestamp - right.createdTimestamp)
+  const lines = collected
+    .sort((left, right) => (left.createdTimestamp || 0) - (right.createdTimestamp || 0))
     .map((message) => {
       const content = String(message.content || "").trim() || "(no text content)";
       return `${message.author?.tag || "Unknown user"}: ${content}`;
     });
 
-  return clampText(lines.join("\n"), 1800);
+  if (collected.length >= boundedMaxMessages) {
+    lines.unshift(`[Transcript limited to the ${boundedMaxMessages} most recent messages.]`);
+  }
+
+  return lines.join("\n") || "(No messages)";
+}
+
+function buildTicketTranscriptPayloads({ channelName = "ticket", openerId = "", transcript = "" } = {}) {
+  const chunks = splitTextIntoChunks(transcript, 1650);
+  const safeChunks = chunks.length > 0 ? chunks : ["(Transcript unavailable)"];
+
+  return safeChunks.map((chunk, index) => ({
+    allowedMentions: {
+      parse: [],
+      users: index === 0 && openerId ? [openerId] : [],
+    },
+    content: [
+      `🧾 Ticket closed from #${String(channelName || "ticket")}`,
+      index === 0
+        ? openerId
+          ? `Opened by: <@${openerId}>`
+          : "Opened by: Unknown member"
+        : `Transcript part ${index + 1}`,
+      "",
+      chunk,
+    ].join("\n"),
+  }));
 }
 
 function sanitizeTicketName(value) {
@@ -310,6 +370,8 @@ function clampText(value, maxLength) {
 module.exports = {
   CLOSE_TICKET_CUSTOM_ID,
   OPEN_TICKET_CUSTOM_ID,
+  buildTicketTranscriptPayloads,
+  buildTranscript,
   buildTicketPanelPayload,
   closeTicket,
   createTicketForUser,

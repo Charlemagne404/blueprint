@@ -89,7 +89,7 @@ function parseBoolean(value, fallback = false) {
 }
 
 function parseInteger(value, fallback, { minimum = Number.MIN_SAFE_INTEGER, maximum = Number.MAX_SAFE_INTEGER } = {}) {
-  const parsed = Number.parseInt(String(value || "").trim(), 10);
+  const parsed = Number.parseInt(String(value ?? "").trim(), 10);
   if (!Number.isInteger(parsed)) {
     return fallback;
   }
@@ -98,7 +98,7 @@ function parseInteger(value, fallback, { minimum = Number.MIN_SAFE_INTEGER, maxi
 }
 
 function parseOptionalFloat(value, { minimum = -Infinity, maximum = Infinity } = {}) {
-  const trimmed = String(value || "").trim();
+  const trimmed = String(value ?? "").trim();
   if (!trimmed) {
     return null;
   }
@@ -112,7 +112,7 @@ function parseOptionalFloat(value, { minimum = -Infinity, maximum = Infinity } =
 }
 
 function parseOptionalInteger(value, { minimum = Number.MIN_SAFE_INTEGER, maximum = Number.MAX_SAFE_INTEGER } = {}) {
-  const trimmed = String(value || "").trim();
+  const trimmed = String(value ?? "").trim();
   if (!trimmed) {
     return null;
   }

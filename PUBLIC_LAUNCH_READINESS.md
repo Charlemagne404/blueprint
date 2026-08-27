@@ -4,7 +4,7 @@
 
 **Decision rule:** The repository gate is ready when every repository-verifiable P0 item is checked, evidence is attached or linked, and the release is reproducible from a clean checkout.
 
-**Last reviewed:** 2026-08-25
+**Last reviewed:** 2026-08-26
 **Current recommendation:** Use this document for the pre-launch repository gate; record live-service validation separately after launch.
 
 ## How to use this checklist
@@ -17,8 +17,8 @@
 
 ## Current local baseline
 
-- [x] `npm test` passes: 68 tests.
-- [x] JavaScript syntax checks pass for the application, scripts, and runtime files (62 files).
+- [x] `npm test` passes: 76 tests.
+- [x] JavaScript syntax checks pass for the application, scripts, and runtime files (63 files).
 - [x] `npm run check:secrets` scans tracked and non-ignored worktree text files for high-confidence credentials and non-placeholder secret assignments.
 - [x] `npm audit --omit=dev --audit-level=moderate` reports zero vulnerabilities.
 - [x] `git diff --check` passes.
@@ -49,7 +49,7 @@
 
 ### Repository-level evidence captured on 2026-08-25
 
-- The working tree passed `npm run check:secrets`, syntax checks for 62 files, and all 68 automated tests.
+- The working tree passed `npm run check:secrets`, syntax checks for 63 files, and all 76 automated tests.
 - Dashboard regression coverage verifies that all 17 server modules have matching live client
   diagnostics and that their registry order remains stable.
 - The hardening tests cover rate-limit rejection, metrics rendering, oversized external responses, persisted cooldown recovery, modmail attachment bounds, and guild-scoped data deletion.
@@ -113,7 +113,10 @@
 
 These items are code or documentation follow-ups and do not require live-service validation to assess:
 
-- [ ] Add pagination or bounded history handling for long ticket transcripts, modmail history, and high-volume guilds.
+- [x] Ticket transcripts paginate through a bounded 500-message history and split delivery into
+  Discord-safe messages.
+- [ ] Add bounded history handling for modmail history and broader high-volume guild event
+  processing.
 - [ ] Review the single-role reaction-role limitation and decide whether a true multi-role message system is needed.
 - [ ] Review the one-table guild-settings architecture and define a migration/versioning strategy before schema growth makes it expensive to change.
 - [ ] Add an explicit admin/operator audit trail for dashboard setting changes if the product needs accountability beyond `updated_by_user_id` and `updated_at`.

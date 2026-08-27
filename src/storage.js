@@ -110,6 +110,7 @@ db.exec(`
     automations_trigger TEXT NOT NULL DEFAULT 'member_join',
     automations_action TEXT NOT NULL DEFAULT 'send_message',
     automations_keyword TEXT NOT NULL DEFAULT '',
+    automations_message TEXT NOT NULL DEFAULT 'Automation fired: {source}.',
     automations_cooldown_seconds INTEGER NOT NULL DEFAULT 60,
     modmail_enabled INTEGER NOT NULL DEFAULT 0,
     modmail_inbox_channel_id TEXT NOT NULL DEFAULT '',
@@ -286,6 +287,7 @@ ensureColumn("automations_log_channel_id", "TEXT NOT NULL DEFAULT ''");
 ensureColumn("automations_trigger", "TEXT NOT NULL DEFAULT 'member_join'");
 ensureColumn("automations_action", "TEXT NOT NULL DEFAULT 'send_message'");
 ensureColumn("automations_keyword", "TEXT NOT NULL DEFAULT ''");
+ensureColumn("automations_message", "TEXT NOT NULL DEFAULT 'Automation fired: {source}.'");
 ensureColumn("automations_cooldown_seconds", "INTEGER NOT NULL DEFAULT 60");
 ensureColumn("modmail_enabled", "INTEGER NOT NULL DEFAULT 0");
 ensureColumn("modmail_inbox_channel_id", "TEXT NOT NULL DEFAULT ''");
@@ -440,6 +442,7 @@ function getGuildSettings(guildId) {
     automationsTrigger: row.automations_trigger || "member_join",
     automationsAction: row.automations_action || "send_message",
     automationsKeyword: row.automations_keyword || "",
+    automationsMessage: row.automations_message || "Automation fired: {source}.",
     automationsCooldownSeconds: normalizeInteger(row.automations_cooldown_seconds, 60),
     modmailEnabled: Boolean(row.modmail_enabled),
     modmailInboxChannelId: row.modmail_inbox_channel_id,
@@ -541,6 +544,7 @@ function saveGuildSettings(guildId, settings, updatedByUserId) {
     settings.automationsTrigger,
     settings.automationsAction,
     settings.automationsKeyword,
+    settings.automationsMessage,
     settings.automationsCooldownSeconds,
     settings.modmailEnabled ? 1 : 0,
     settings.modmailInboxChannelId,
@@ -635,6 +639,7 @@ function saveGuildSettings(guildId, settings, updatedByUserId) {
       automations_trigger,
       automations_action,
       automations_keyword,
+      automations_message,
       automations_cooldown_seconds,
       modmail_enabled,
       modmail_inbox_channel_id,
@@ -727,6 +732,7 @@ function saveGuildSettings(guildId, settings, updatedByUserId) {
       automations_trigger = excluded.automations_trigger,
       automations_action = excluded.automations_action,
       automations_keyword = excluded.automations_keyword,
+      automations_message = excluded.automations_message,
       automations_cooldown_seconds = excluded.automations_cooldown_seconds,
       modmail_enabled = excluded.modmail_enabled,
       modmail_inbox_channel_id = excluded.modmail_inbox_channel_id,
@@ -1186,6 +1192,6 @@ function parseJsonObjectArray(value) {
 }
 
 function normalizeInteger(value, fallback) {
-  const parsed = Number.parseInt(String(value || "").trim(), 10);
+  const parsed = Number.parseInt(String(value ?? "").trim(), 10);
   return Number.isInteger(parsed) ? parsed : fallback;
 }

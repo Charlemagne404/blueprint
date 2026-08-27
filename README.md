@@ -58,7 +58,9 @@ Examples of managed modules in this repo include:
 Runtime notes:
 
 - Modmail forwards member DMs to the configured inbox. Staff reply by replying to the forwarded Discord message; Blueprint sends that reply back to the member.
+- Automation notices support configurable copy with `{source}`, `{user}`, and `{mention}` tokens.
 - The automation `Create ticket` action requires the Tickets module to be enabled and configured, and creates a real private ticket channel.
+- Ticket transcripts are bounded and delivered in multiple Discord-safe messages when needed.
 - Reaction roles currently support one configured role per reaction message.
 
 ## Slash Commands

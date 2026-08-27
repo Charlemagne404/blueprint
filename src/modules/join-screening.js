@@ -258,16 +258,30 @@ async function screenNewMember(member, settings) {
   let actionResult = "Flagged for staff review.";
   let preventedOnboarding = false;
 
-  if (settings.joinScreeningAction === "kick" && member.kickable) {
-    await member.kick("Blueprint join screening").catch(() => null);
-    actionResult = "Member was kicked automatically.";
-    preventedOnboarding = true;
+  if (settings.joinScreeningAction === "kick") {
+    if (!member.kickable) {
+      actionResult = "Blueprint could not kick the member because of Discord role hierarchy.";
+    } else {
+      try {
+        await member.kick("Blueprint join screening");
+        actionResult = "Member was kicked automatically.";
+        preventedOnboarding = true;
+      } catch {
+        actionResult = "Blueprint could not kick the member; staff review is required.";
+      }
+    }
   } else if (settings.joinScreeningAction === "quarantine") {
     const role = member.guild.roles.cache.get(settings.joinScreeningQuarantineRoleId);
-    if (role) {
-      await member.roles.add(role, "Blueprint join screening").catch(() => null);
-      actionResult = `Assigned quarantine role ${role.name}.`;
-      preventedOnboarding = true;
+    if (!role) {
+      actionResult = "The configured quarantine role is no longer available.";
+    } else {
+      try {
+        await member.roles.add(role, "Blueprint join screening");
+        actionResult = `Assigned quarantine role ${role.name}.`;
+        preventedOnboarding = true;
+      } catch {
+        actionResult = "Blueprint could not assign the quarantine role; staff review is required.";
+      }
     }
   }
 
@@ -285,7 +299,7 @@ async function screenNewMember(member, settings) {
         `Action: ${actionResult}`,
         `Created: <t:${Math.floor(member.user.createdTimestamp / 1000)}:F>`,
       ].join("\n"),
-    });
+    }).catch(() => null);
   }
 
   return {

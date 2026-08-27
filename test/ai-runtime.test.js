@@ -7,6 +7,8 @@ const {
   extractAiAnswer,
   getAiAccessRequirementMessage,
   parseBoolean,
+  parseInteger,
+  parseOptionalInteger,
   resolveAiBaseUrl,
   resolveAiServiceUrl,
   stripBotMention,
@@ -113,4 +115,9 @@ test("AI prompt helpers preserve persona and strip mentions", () => {
   );
   assert.equal(stripBotMention("<@123> hello <@!123>", "123"), "hello");
   assert.equal(parseBoolean("on", false), true);
+});
+
+test("AI numeric parsers keep intentional zero values", () => {
+  assert.equal(parseInteger(0, 60, { minimum: 0, maximum: 3600 }), 0);
+  assert.equal(parseOptionalInteger(0, { minimum: 0, maximum: 3600 }), 0);
 });

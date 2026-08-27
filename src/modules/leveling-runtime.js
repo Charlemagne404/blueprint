@@ -1,6 +1,23 @@
 const { getLevelingMemberStats, upsertLevelingMemberStats } = require("../storage");
 
 const LEVEL_XP_FACTOR = 100;
+const levelingMemberQueues = new Map();
+
+function enqueueLevelingTask(key, task) {
+  const previous = levelingMemberQueues.get(key) || Promise.resolve();
+  const current = previous.catch(() => undefined).then(task);
+
+  levelingMemberQueues.set(key, current);
+  current
+    .finally(() => {
+      if (levelingMemberQueues.get(key) === current) {
+        levelingMemberQueues.delete(key);
+      }
+    })
+    .catch(() => undefined);
+
+  return current;
+}
 
 function getXpRequiredForLevel(level) {
   const normalizedLevel = Math.max(0, Number(level) || 0);
@@ -48,44 +65,47 @@ async function processLevelingMessage(message, settings) {
     return null;
   }
 
-  const now = new Date();
-  const current = getLevelingMemberStats(message.guild.id, message.author.id);
-  if (!shouldGrantLevelingXp(current.lastMessageAt, settings.levelingCooldownSeconds, now)) {
-    return null;
-  }
+  return enqueueLevelingTask(`${message.guild.id}:${message.author.id}`, async () => {
+    const now = new Date();
+    const current = getLevelingMemberStats(message.guild.id, message.author.id);
+    if (!shouldGrantLevelingXp(current.lastMessageAt, settings.levelingCooldownSeconds, now)) {
+      return null;
+    }
 
-  const nextXp = current.xp + settings.levelingXpPerMessage;
-  const nextLevel = getLevelFromXp(nextXp);
-  const leveledUp = nextLevel > current.level;
+    const nextXp = current.xp + settings.levelingXpPerMessage;
+    const nextLevel = getLevelFromXp(nextXp);
+    const leveledUp = nextLevel > current.level;
 
-  upsertLevelingMemberStats(message.guild.id, message.author.id, {
-    lastMessageAt: now.toISOString(),
-    level: nextLevel,
-    xp: nextXp,
-  });
+    upsertLevelingMemberStats(message.guild.id, message.author.id, {
+      lastMessageAt: now.toISOString(),
+      level: nextLevel,
+      xp: nextXp,
+    });
 
-  if (!leveledUp) {
+    if (!leveledUp) {
+      return {
+        level: nextLevel,
+        leveledUp: false,
+        xp: nextXp,
+      };
+    }
+
+    await announceChannel.send({
+      allowedMentions: { parse: [], users: [message.author.id] },
+      content: renderLevelUpMessage(settings.levelingLevelUpMessage, message.member, nextLevel),
+    });
+
     return {
       level: nextLevel,
-      leveledUp: false,
+      leveledUp: true,
       xp: nextXp,
     };
-  }
-
-  await announceChannel.send({
-    allowedMentions: { parse: [], users: [message.author.id] },
-    content: renderLevelUpMessage(settings.levelingLevelUpMessage, message.member, nextLevel),
   });
-
-  return {
-    level: nextLevel,
-    leveledUp: true,
-    xp: nextXp,
-  };
 }
 
 module.exports = {
   LEVEL_XP_FACTOR,
+  enqueueLevelingTask,
   getLevelFromXp,
   getXpRequiredForLevel,
   processLevelingMessage,

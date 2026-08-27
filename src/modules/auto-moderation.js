@@ -252,13 +252,15 @@ async function moderateMessage(message, settings) {
 
   let timedOut = false;
   if (settings.autoModerationTimeoutMinutes > 0 && message.member.moderatable) {
-    await message.member
-      .timeout(
+    try {
+      await message.member.timeout(
         settings.autoModerationTimeoutMinutes * 60 * 1000,
         `Blueprint automod: ${reasons.join(", ")}`,
-      )
-      .catch(() => null);
-    timedOut = true;
+      );
+      timedOut = true;
+    } catch {
+      timedOut = false;
+    }
   }
 
   const logChannel = message.guild.channels.cache.get(settings.autoModerationLogChannelId);
@@ -272,7 +274,7 @@ async function moderateMessage(message, settings) {
         `Reason: ${reasons.join(", ")}`,
         `Content: ${summarizeMessageContent(message.content)}`,
       ].join("\n"),
-    });
+    }).catch(() => null);
   }
 
   return {

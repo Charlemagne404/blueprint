@@ -384,6 +384,30 @@
     }
   }
 
+  function bindAutomationControls() {
+    const triggerSelect = document.querySelector("[data-automation-trigger]");
+    const actionSelect = document.querySelector("[data-automation-action]");
+    const keywordField = document.querySelector("[data-automation-keyword-field]");
+    const messageField = document.querySelector("[data-automation-message-field]");
+
+    if (!triggerSelect && !actionSelect) {
+      return;
+    }
+
+    function syncAutomationFields() {
+      if (keywordField && triggerSelect) {
+        keywordField.classList.toggle("is-hidden", triggerSelect.value !== "keyword");
+      }
+      if (messageField && actionSelect) {
+        messageField.classList.toggle("is-hidden", actionSelect.value !== "send_message");
+      }
+    }
+
+    triggerSelect?.addEventListener("change", syncAutomationFields);
+    actionSelect?.addEventListener("change", syncAutomationFields);
+    syncAutomationFields();
+  }
+
   function bindGuildSearchControls() {
     const searchInput = document.querySelector("[data-guild-search]");
     const attentionToggle = document.querySelector("[data-guild-attention-filter]");
@@ -2313,6 +2337,7 @@
   bindModuleJumpLinks();
   bindModuleLibraryFilter();
   bindCountdownControls();
+  bindAutomationControls();
   bindGuildSearchControls();
   bindSettingsFormUX();
   focusFlashNotice();

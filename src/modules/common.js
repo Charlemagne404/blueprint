@@ -13,12 +13,41 @@ function normalizeText(value, fallback, maxLength) {
 }
 
 function normalizeInteger(value, fallback, min, max) {
-  const parsed = Number.parseInt(String(value || "").trim(), 10);
+  const parsed = Number.parseInt(String(value ?? "").trim(), 10);
   if (!Number.isInteger(parsed)) {
     return fallback;
   }
 
   return Math.min(max, Math.max(min, parsed));
+}
+
+function splitTextIntoChunks(value, maxLength = 1900) {
+  const text = String(value ?? "").trim();
+  const limit = Number.isInteger(maxLength) && maxLength > 0 ? maxLength : 1900;
+  if (!text) {
+    return [];
+  }
+
+  const chunks = [];
+  let remaining = text;
+  while (remaining.length > limit) {
+    let splitAt = remaining.lastIndexOf("\n", limit);
+    if (splitAt < 1) {
+      splitAt = remaining.lastIndexOf(" ", limit);
+    }
+    if (splitAt < 1) {
+      splitAt = limit;
+    }
+
+    chunks.push(remaining.slice(0, splitAt).trimEnd());
+    remaining = remaining.slice(splitAt).trimStart();
+  }
+
+  if (remaining) {
+    chunks.push(remaining);
+  }
+
+  return chunks;
 }
 
 function normalizeTextareaList(value, { itemMaxLength = 40, maxItems = 20 } = {}) {
@@ -151,4 +180,5 @@ module.exports = {
   normalizeInteger,
   normalizeText,
   normalizeTextareaList,
+  splitTextIntoChunks,
 };

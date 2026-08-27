@@ -167,17 +167,11 @@ async function sendWelcomeMessage(member, settings) {
     return;
   }
 
-  await channel.send(
-    renderTemplate(settings.welcomeMessageTemplate, {
-      displayName: member.displayName,
-      mention: `<@${member.id}>`,
-      server: member.guild.name,
-      user: member.user.username,
-    }),
-  );
+  await channel.send(buildWelcomeMessagePayload(member, settings));
 }
 
 module.exports = {
+  buildWelcomeMessagePayload,
   defaults,
   getWelcomeChannelOptions,
   getWelcomeState,
@@ -187,6 +181,21 @@ module.exports = {
   sendWelcomeMessage,
   validateWelcomeSettings,
 };
+
+function buildWelcomeMessagePayload(member, settings) {
+  return {
+    allowedMentions: {
+      parse: [],
+      users: member?.id ? [member.id] : [],
+    },
+    content: renderTemplate(settings.welcomeMessageTemplate, {
+      displayName: member.displayName,
+      mention: member?.id ? `<@${member.id}>` : "new member",
+      server: member.guild.name,
+      user: member.user.username,
+    }),
+  };
+}
 
 function buildWelcomePreview(settings, guildName, channelOptions, state) {
   return {

@@ -148,6 +148,7 @@ const {
   validateReactionRoleSettings,
 } = require("./modules/reaction-roles");
 const {
+  getAutomationMessage,
   normalizeAutomationSettings,
   validateAutomationSettings,
 } = require("./modules/automations");
@@ -159,6 +160,7 @@ const {
   getModmailReplyContent,
 } = require("./modules/modmail-runtime");
 const {
+  buildApplicationSubmissionMessages,
   getApplicationPrompts,
   normalizeApplicationSettings,
   validateApplicationSettings,
@@ -1217,13 +1219,13 @@ async function replyWithRuntimeError(interaction) {
     ephemeral: true,
   };
 
-  if (interaction.deferred) {
-    await interaction.editReply(payload).catch(() => null);
+  if (interaction.replied) {
+    await interaction.followUp(payload).catch(() => null);
     return;
   }
 
-  if (interaction.replied) {
-    await interaction.followUp(payload).catch(() => null);
+  if (interaction.deferred) {
+    await interaction.editReply(payload).catch(() => null);
     return;
   }
 
@@ -1237,13 +1239,17 @@ async function handleCommand(interaction) {
   const settings = interaction.guildId ? getGuildSettings(interaction.guildId) : null;
 
   if (interaction.commandName === "ping") {
-    await interaction.reply(settings?.pingResponse || "Pong.");
+    await interaction.reply({
+      allowedMentions: { parse: [] },
+      content: settings?.pingResponse || "Pong.",
+    });
     return;
   }
 
   if (interaction.commandName === "hello") {
     if (interaction.guildId && settings && !settings.helloEnabled) {
       await interaction.reply({
+        allowedMentions: { parse: [] },
         content: "The hello command is disabled in this server.",
         ephemeral: true,
       });
@@ -1255,7 +1261,10 @@ async function handleCommand(interaction) {
       .replaceAll("{user}", interaction.user.username)
       .replaceAll("{server}", interaction.guild?.name || "this server");
 
-    await interaction.reply(message);
+    await interaction.reply({
+      allowedMentions: { parse: [] },
+      content: message,
+    });
     return;
   }
 
@@ -1267,6 +1276,7 @@ async function handleCommand(interaction) {
   if (interaction.commandName === "countdown") {
     const countdown = getCountdownResult(settings || {});
     await interaction.reply({
+      allowedMentions: { parse: [] },
       content: countdown.commandPreview,
       ephemeral: countdown.state === "disabled" || countdown.state === "incomplete",
     });
@@ -1318,14 +1328,20 @@ async function handleButtonInteraction(interaction) {
   if (interaction.customId === OPEN_TICKET_CUSTOM_ID) {
     await interaction.deferReply({ ephemeral: true });
     const result = await openTicket(interaction, settings, botMember);
-    await interaction.editReply(result);
+    await interaction.editReply({
+      allowedMentions: { parse: [] },
+      content: result,
+    });
     return;
   }
 
   if (interaction.customId === CLOSE_TICKET_CUSTOM_ID) {
     await interaction.deferReply({ ephemeral: true });
     const result = await closeTicket(interaction, settings);
-    await interaction.editReply(result || "Ticket closed.");
+    await interaction.editReply({
+      allowedMentions: { parse: [] },
+      content: result || "Ticket closed.",
+    });
   }
 }
 
@@ -1336,18 +1352,18 @@ async function handleModalSubmit(interaction) {
 }
 
 async function handleAnnouncementCommand(interaction) {
+  await interaction.deferReply({ ephemeral: true });
+
   if (!interaction.inGuild() || !interaction.guild) {
-    await interaction.reply({
+    await interaction.editReply({
       content: "Announcements can only be used inside a server.",
-      ephemeral: true,
     });
     return;
   }
 
   if (!memberCanManageServer(interaction)) {
-    await interaction.reply({
+    await interaction.editReply({
       content: "You need Manage Server or Administrator to publish announcements.",
-      ephemeral: true,
     });
     return;
   }
@@ -1359,9 +1375,8 @@ async function handleAnnouncementCommand(interaction) {
   const botMember = await getBotGuildMember(interaction.guild);
   const errors = validateAnnouncementSettings(settings, interaction.guild, botMember);
   if (!settings.announcementsEnabled || errors.length > 0) {
-    await interaction.reply({
+    await interaction.editReply({
       content: errors[0] || "Announcements are disabled in this server.",
-      ephemeral: true,
     });
     return;
   }
@@ -1376,9 +1391,8 @@ async function handleAnnouncementCommand(interaction) {
   const roleId = settings.announcementsDefaultRoleId;
 
   if (shouldPing && !roleId) {
-    await interaction.reply({
+    await interaction.editReply({
       content: "This server has no default announcement role configured to ping.",
-      ephemeral: true,
     });
     return;
   }
@@ -1390,17 +1404,17 @@ async function handleAnnouncementCommand(interaction) {
     content,
   });
 
-  await interaction.reply({
+  await interaction.editReply({
     content: `Announcement posted in <#${channel.id}>.`,
-    ephemeral: true,
   });
 }
 
 async function handleSuggestionCommand(interaction) {
+  await interaction.deferReply({ ephemeral: true });
+
   if (!interaction.inGuild() || !interaction.guild) {
-    await interaction.reply({
+    await interaction.editReply({
       content: "Suggestions can only be submitted inside a server.",
-      ephemeral: true,
     });
     return;
   }
@@ -1410,9 +1424,8 @@ async function handleSuggestionCommand(interaction) {
   const botMember = await getBotGuildMember(interaction.guild);
   const errors = validateSuggestionSettings(settings, interaction.guild, botMember);
   if (!settings.suggestionsEnabled || errors.length > 0) {
-    await interaction.reply({
+    await interaction.editReply({
       content: errors[0] || "Suggestions are disabled in this server.",
-      ephemeral: true,
     });
     return;
   }
@@ -1420,9 +1433,8 @@ async function handleSuggestionCommand(interaction) {
   const idea = normalizeText(interaction.options.getString("idea", true), "", 1000);
   const anonymous = interaction.options.getBoolean("anonymous") === true;
   if (anonymous && !settings.suggestionsAnonymousAllowed) {
-    await interaction.reply({
+    await interaction.editReply({
       content: "Anonymous suggestions are disabled in this server.",
-      ephemeral: true,
     });
     return;
   }
@@ -1456,9 +1468,8 @@ async function handleSuggestionCommand(interaction) {
     });
   }
 
-  await interaction.reply({
+  await interaction.editReply({
     content: `Suggestion #${suggestionNumber} posted in <#${publicChannel.id}>.`,
-    ephemeral: true,
   });
 
   await runSuggestionAutomation(interaction.guild, settings, {
@@ -1477,10 +1488,8 @@ async function handleApplicationCommand(interaction) {
     return;
   }
 
-  await interaction.guild.channels.fetch();
-  await interaction.guild.roles.fetch();
   const settings = getGuildSettings(interaction.guildId);
-  const botMember = await getBotGuildMember(interaction.guild).catch(() => null);
+  const botMember = interaction.guild.members.me || null;
   const errors = validateApplicationSettings(settings, interaction.guild, botMember);
   if (!settings.applicationsEnabled || errors.length > 0) {
     await interaction.reply({
@@ -1520,10 +1529,11 @@ async function handleApplicationCommand(interaction) {
 }
 
 async function handleApplicationModalSubmit(interaction) {
+  await interaction.deferReply({ ephemeral: true });
+
   if (!interaction.inGuild() || !interaction.guild) {
-    await interaction.reply({
+    await interaction.editReply({
       content: "Applications can only be submitted inside a server.",
-      ephemeral: true,
     });
     return;
   }
@@ -1534,18 +1544,16 @@ async function handleApplicationModalSubmit(interaction) {
   const botMember = await getBotGuildMember(interaction.guild).catch(() => null);
   const errors = validateApplicationSettings(settings, interaction.guild, botMember);
   if (!settings.applicationsEnabled || errors.length > 0) {
-    await interaction.reply({
+    await interaction.editReply({
       content: errors[0] || "Applications are disabled in this server.",
-      ephemeral: true,
     });
     return;
   }
 
   const prompts = getApplicationPrompts(settings);
   if (prompts.length === 0 || prompts.length > 5) {
-    await interaction.reply({
+    await interaction.editReply({
       content: "Applications need between 1 and 5 prompts before members can submit the form.",
-      ephemeral: true,
     });
     return;
   }
@@ -1560,41 +1568,36 @@ async function handleApplicationModalSubmit(interaction) {
     prompt,
   }));
 
-  await destination.send({
-    allowedMentions: { parse: [], roles: [settings.applicationsReviewerRoleId] },
-    content: [
-      `**${settings.applicationsFormTitle}**`,
-      `Submitted by: <@${interaction.user.id}>`,
-      settings.applicationsReviewerRoleId
-        ? `Reviewer role: <@&${settings.applicationsReviewerRoleId}>`
-        : "",
-      "",
-      ...answers.flatMap(({ prompt, answer }) => [`**${prompt}**`, answer, ""]),
-    ]
-      .filter(Boolean)
-      .join("\n"),
+  const messages = buildApplicationSubmissionMessages({
+    answers,
+    reviewerRoleId: settings.applicationsReviewerRoleId,
+    title: settings.applicationsFormTitle,
+    userId: interaction.user.id,
+    userTag: interaction.user.tag,
   });
+  for (const message of messages) {
+    await destination.send(message);
+  }
 
-  await interaction.reply({
+  await interaction.editReply({
     content: `Application submitted to <#${destination.id}>.`,
-    ephemeral: true,
   });
 }
 
 async function handleAiCommand(interaction, settings) {
+  await interaction.deferReply({ ephemeral: true });
+
   if (!interaction.inGuild() || !interaction.guild || !settings) {
-    await interaction.reply({
+    await interaction.editReply({
       content: "Blueprint AI is only available inside configured servers.",
-      ephemeral: true,
     });
     return;
   }
 
   const availabilityError = getAiAvailabilityError(settings);
   if (availabilityError) {
-    await interaction.reply({
+    await interaction.editReply({
       content: availabilityError,
-      ephemeral: true,
     });
     return;
   }
@@ -1602,17 +1605,15 @@ async function handleAiCommand(interaction, settings) {
   const botMember = await getBotGuildMember(interaction.guild).catch(() => null);
   const validationErrors = validateAiToolsSettings(settings, interaction.guild, botMember);
   if (validationErrors.length > 0) {
-    await interaction.reply({
+    await interaction.editReply({
       content: validationErrors[0],
-      ephemeral: true,
     });
     return;
   }
 
   if (interaction.channelId !== settings.aiToolsChannelId) {
-    await interaction.reply({
+    await interaction.editReply({
       content: `Use Blueprint AI in <#${settings.aiToolsChannelId}>.`,
-      ephemeral: true,
     });
     return;
   }
@@ -1623,23 +1624,21 @@ async function handleAiCommand(interaction, settings) {
     interaction.user.id,
   );
   if (!aiCooldowns.consume(aiSessionId, config.aiRequestCooldownSeconds)) {
-    await interaction.reply({
+    await interaction.editReply({
       content: "Please wait a moment before sending another AI request.",
-      ephemeral: true,
     });
     return;
   }
 
   const accessError = await getAiAccessError(interaction.user.id);
   if (accessError) {
-    await interaction.reply({
+    await interaction.editReply({
+      allowedMentions: { parse: [] },
       content: accessError,
-      ephemeral: true,
     });
     return;
   }
 
-  await interaction.deferReply();
   const reply = await requestAiReply({
     persona: settings.aiToolsPersona,
     question: normalizeText(interaction.options.getString("question", true), "", 1500),
@@ -1661,19 +1660,21 @@ async function handleAiCommand(interaction, settings) {
 }
 
 async function handleAiResetCommand(interaction, settings) {
+  await interaction.deferReply({ ephemeral: true });
+
   if (!interaction.inGuild() || !interaction.guild || !settings) {
-    await interaction.reply({
+    await interaction.editReply({
+      allowedMentions: { parse: [] },
       content: "Blueprint AI memory can only be reset inside configured servers.",
-      ephemeral: true,
     });
     return;
   }
 
   const availabilityError = getAiAvailabilityError(settings);
   if (availabilityError) {
-    await interaction.reply({
+    await interaction.editReply({
+      allowedMentions: { parse: [] },
       content: availabilityError,
-      ephemeral: true,
     });
     return;
   }
@@ -1681,31 +1682,30 @@ async function handleAiResetCommand(interaction, settings) {
   const botMember = await getBotGuildMember(interaction.guild).catch(() => null);
   const validationErrors = validateAiToolsSettings(settings, interaction.guild, botMember);
   if (validationErrors.length > 0) {
-    await interaction.reply({
+    await interaction.editReply({
+      allowedMentions: { parse: [] },
       content: validationErrors[0],
-      ephemeral: true,
     });
     return;
   }
 
   if (interaction.channelId !== settings.aiToolsChannelId) {
-    await interaction.reply({
+    await interaction.editReply({
+      allowedMentions: { parse: [] },
       content: `Reset AI memory from <#${settings.aiToolsChannelId}>.`,
-      ephemeral: true,
     });
     return;
   }
 
   const accessError = await getAiAccessError(interaction.user.id);
   if (accessError) {
-    await interaction.reply({
+    await interaction.editReply({
+      allowedMentions: { parse: [] },
       content: accessError,
-      ephemeral: true,
     });
     return;
   }
 
-  await interaction.deferReply({ ephemeral: true });
   const result = await resetAiSession(
     buildAiSessionId(interaction.guildId, interaction.channelId, interaction.user.id),
     config,
@@ -1721,15 +1721,19 @@ async function handleAiResetCommand(interaction, settings) {
   }
 
   if (result.ok) {
-    await interaction.editReply("AI session memory reset for this channel.");
+    await interaction.editReply({
+      allowedMentions: { parse: [] },
+      content: "AI session memory reset for this channel.",
+    });
     return;
   }
 
-  await interaction.editReply(
-    result.error
+  await interaction.editReply({
+    allowedMentions: { parse: [] },
+    content: result.error
       ? `Could not reset AI session memory right now. ${result.error}`
       : `Could not reset AI session memory (HTTP ${result.status || "unknown"}).`,
-  );
+  });
 }
 
 async function handleAiToolsMessage(message, settings) {
@@ -2378,9 +2382,15 @@ async function executeAutomationAction(guild, settings, payload) {
   }
 
   if (settings.automationsAction === "send_message") {
+    const targetMember = payload.member || payload.context?.member;
+    const targetUser = targetMember?.user || targetMember;
+    const targetUserId = targetMember?.id || targetUser?.id;
     await logChannel.send({
-      allowedMentions: { parse: [] },
-      content: `⚙️ Automation fired (${payload.source}).`,
+      allowedMentions: {
+        parse: [],
+        users: targetUserId ? [targetUserId] : [],
+      },
+      content: `⚙️ ${getAutomationMessage(settings, payload)}`,
     });
     return;
   }
@@ -2414,11 +2424,24 @@ async function executeAutomationAction(guild, settings, payload) {
     return;
   }
 
-  if (settings.automationsAction === "assign_role" && payload.member && settings.autoRoleRoleId) {
-    await payload.member.roles.add(settings.autoRoleRoleId, "Blueprint automation").catch(() => null);
+  if (settings.automationsAction === "assign_role" && settings.autoRoleRoleId) {
+    const targetMember = payload.member || payload.context?.member;
+    const targetUser = targetMember?.user || targetMember;
+    let assigned = false;
+    if (targetMember?.roles?.add) {
+      try {
+        await targetMember.roles.add(settings.autoRoleRoleId, "Blueprint automation");
+        assigned = true;
+      } catch {
+        assigned = false;
+      }
+    }
+
     await logChannel.send({
       allowedMentions: { parse: [] },
-      content: `⚙️ Automation assigned role to ${payload.member.user.tag} (${payload.source}).`,
+      content: assigned
+        ? `⚙️ Automation assigned a role to ${targetUser?.tag || targetUser?.username || targetUser?.id || "the member"} (${payload.source}).`
+        : `⚙️ Automation could not assign a role for ${payload.source}: no assignable member context was available.`,
     });
   }
 }
@@ -2972,7 +2995,10 @@ async function runCountdownAlertSweep() {
           continue;
         }
 
-        await channel.send(buildCountdownAlertMessage(settings, { now }));
+        await channel.send({
+          allowedMentions: { parse: [] },
+          content: buildCountdownAlertMessage(settings, { now }),
+        });
         setCountdownAlertLastSentOn(
           guild.id,
           getCurrentIsoDateInTimeZone(

@@ -2,11 +2,38 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 
 const {
+  enqueueLevelingTask,
   getLevelFromXp,
   getXpRequiredForLevel,
   renderLevelUpMessage,
   shouldGrantLevelingXp,
 } = require("../src/modules/leveling-runtime");
+
+test("leveling tasks for one member run in order and recover after failures", async () => {
+  const events = [];
+  const key = `queue-test-${Date.now()}-${Math.random()}`;
+  const first = enqueueLevelingTask(key, async () => {
+    events.push("first:start");
+    await Promise.resolve();
+    events.push("first:end");
+    return 1;
+  });
+  const second = enqueueLevelingTask(key, async () => {
+    events.push("second");
+    return 2;
+  });
+
+  assert.deepEqual(await Promise.all([first, second]), [1, 2]);
+  assert.deepEqual(events, ["first:start", "first:end", "second"]);
+
+  const failed = enqueueLevelingTask(key, async () => {
+    throw new Error("expected queue failure");
+  });
+  const recovered = enqueueLevelingTask(key, async () => "recovered");
+
+  await assert.rejects(failed, /expected queue failure/);
+  assert.equal(await recovered, "recovered");
+});
 
 test("leveling progression uses quadratic thresholds", () => {
   assert.equal(getXpRequiredForLevel(1), 100);

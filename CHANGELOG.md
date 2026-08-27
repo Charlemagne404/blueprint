@@ -1,6 +1,21 @@
 # Changelog
 
-## Unreleased — 2026-08-25
+## Unreleased — 2026-08-27
+
+### Runtime reliability and UX
+
+- Fixed numeric settings so intentional zero values (including cooldowns, mention limits, and
+  timeouts) survive dashboard saves and SQLite round trips.
+- Added a configurable automation message with `{source}`, `{user}`, and `{mention}` tokens;
+  suggestion-triggered role actions now receive their member context correctly.
+- Added paginated, bounded ticket transcripts and split long application submissions into
+  Discord-safe messages.
+- Serialized leveling updates per guild/member so concurrent messages cannot overwrite earned
+  XP, while unrelated members continue processing independently.
+- Added explicit mention allowlists for configurable bot messages and made moderation and join
+  screening reports reflect whether Discord actually completed the requested action.
+- Deferred slower announcement, suggestion, application-submit, and AI interactions before
+  gateway/API work so they do not expire while the bot is validating configuration.
 
 ### Launch-readiness hardening
 
@@ -21,8 +36,11 @@
 
 ### Compatibility and data notes
 
-- Existing guild settings remain compatible; the new `automation_cooldown_state` and
-  `anti_raid_lockdown_state` tables are created automatically for existing installations.
+- Existing guild settings remain compatible; the additive `automations_message` column and the
+  `automation_cooldown_state` and `anti_raid_lockdown_state` tables are created automatically
+  for existing installations.
+- The automation message migration is additive and has a safe default, so existing rules keep
+  their previous activity notice until an administrator customizes it.
 - Production deployments must set a unique `METRICS_TOKEN` of at least 32 characters.
 - Guild deletion removes local Blueprint records only; Discord-side messages and external AI
   provider state require their own approved deletion workflows.
